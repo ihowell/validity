@@ -54,7 +54,7 @@ class ODINDetector:
         inputs = Variable(images, requires_grad=True)
 
         # Currently assumes batch_size=1
-        assert inputs.shape[0] == 1
+        # assert inputs.shape[0] == 1
 
         outputs = self.network(inputs)
 
@@ -64,7 +64,7 @@ class ODINDetector:
         # Calculating the perturbation we need to add, that is,
         # the sign of gradient of cross entropy loss w.r.t. input
         maxIndexTemp = torch.argmax(outputs, 1)
-        labels = Variable(torch.LongTensor([maxIndexTemp]))
+        labels = Variable(torch.LongTensor(maxIndexTemp))
 
         loss = self.criterion(outputs, labels)
         loss.backward()
@@ -85,7 +85,7 @@ class ODINDetector:
         # Calculating the confidence after adding perturbations
         # nnOutputs = outputs.data.cpu()
         nnOutputs = outputs
-        nnOutputs = nnOutputs - torch.max(nnOutputs, 1)[0]
+        nnOutputs = nnOutputs - torch.max(nnOutputs, 1, keepdim=True)[0]
         nnOutputs = nn.Softmax(1)(nnOutputs)
         return nnOutputs
 
@@ -101,12 +101,12 @@ def main(location):
         datasets.CIFAR10(
             root='./', train=True, download=True,
             transform=in_transform),
-        batch_size=1, shuffle=True)
+        batch_size=64, shuffle=True)
     out_train_loader = torch.utils.data.DataLoader(
         datasets.SVHN(
             root='./', split='train', download=True,
             transform=in_transform),
-        batch_size=1, shuffle=True)
+        batch_size=64, shuffle=True)
 
     odin.train(in_train_loader, out_train_loader)
 
