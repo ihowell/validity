@@ -34,43 +34,6 @@ class ODINDetector:
         score = self.score(inputs)
         return score > threshold
 
-    def validate(self, in_test_loader, out_test_loader):
-        self.network.eval()
-        score_in = []
-        total_in = 0
-        for data, _ in tqdm(in_test_loader, desc='Validation in loader'):
-            total_in += data.size(0)
-            score_in.append(self.score(data))
-            if total_in >= 1000:
-                break
-        score_in = np.concatenate(score_in)
-        score_in = score_in[:1000]
-
-        score_out = []
-        total_out = 0
-        for data, _ in tqdm(out_test_loader, desc='Validation out loader'):
-            total_out += data.size(0)
-            score_out.append(self.score(data))
-            if total_out >= 1000:
-                break
-        score_out = np.concatenate(score_out)
-        score_out = score_out[:1000]
-
-        scores = np.concatenate([score_in, score_out])
-        labels = np.concatenate(
-            [np.ones(score_in.shape[0]),
-             np.zeros(score_out.shape[0])])
-
-        fpr, tpr, thresholds = roc_curve(labels, scores)
-        best_th = thresholds[0]
-        best_acc = (1. - fpr[0] + tpr[0]) / 2.
-        for fr, tr, th in zip(fpr, tpr, thresholds):
-            acc = (1. - fr + tr) / 2.
-            if best_acc < acc:
-                best_acc = acc
-                best_th = th
-        self.threshold = best_th
-
     def evaluate(self, in_loader, out_loader):
         self.network.eval()
         score_in = []
