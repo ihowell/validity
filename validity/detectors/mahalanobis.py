@@ -378,6 +378,70 @@ def train_mahalanobis_ood(location,
     return results
 
 
+def train_mahalanobis_adv(location,
+                          data_root='./',
+                          cuda_idx=0,
+                          magnitude=1e-2,
+                          temperature=1000.):
+    from validity.classifiers.resnet import ResNet34
+    torch.cuda.manual_seed(0)
+    torch.cuda.set_device(cuda_idx)
+
+    network = ResNet34(10)
+    weights = torch.load(location, map_location=f'cuda:{cuda_idx}')
+    network.load_state_dict(weights)
+    network.cuda()
+
+    detector = MahalanobisDetector(model=network,
+                                   num_classes=10,
+                                   noise_magnitude=magnitude,
+                                   temper=temperature,
+                                   net_type='resnet')
+
+    # Note: The transform is the per channel mean and std dev of
+    # cifar10 training set.
+    in_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465),
+                             (0.2023, 0.1994, 0.2010)),
+    ])
+
+    in_train_loader = torch.utils.data.DataLoader(datasets.CIFAR10(
+        root=data_root, train=False, download=True, transform=in_transform),
+                                                  batch_size=64,
+                                                  shuffle=True)
+
+    detector.train(in_train_loader)
+
+    in_test_loader = torch.utils.data.DataLoader(datasets.CIFAR10(
+        root=data_root, train=False, download=True, transform=in_transform),
+                                                 batch_size=64,
+                                                 shuffle=True)
+
+    out_dataset = datasets.SVHN(root=data_root,
+                                split='test',
+                                download=True,
+                                transform=in_transform)
+    out_test_loader = torch.utils.data.DataLoader(out_dataset,
+                                                  batch_size=64,
+                                                  shuffle=True)
+    results = detector.evaluate(in_test_loader, out_test_loader)
+    save_path = pathlib.Path('mahalanobis', 'resnet34', 'cifar10', 'ood.pt')
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(detector, save_path)
+    print(f'Magnitude {magnitude} temperature {temperature}:')
+    for result_name, result in results.items():
+        if type(result) in [dict, tuple, list]:
+            continue
+        if type(result) is np.ndarray:
+            if np.flatten(result).shape == [1]:
+                result = np.flatten(result)[0]
+            else:
+                continue
+        print(f'{result_name:20}: {result:.4f}')
+    return results
+
+
 def train_multiple_mahalanobis_ood(weights_path, data_root='./', cuda_idx=0):
     magnitudes = [
         0, 0.0005, 0.001, 0.0014, 0.002, 0.0024, 0.005, 0.01, 0.05, 0.1, 0.2
