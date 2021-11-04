@@ -22,6 +22,7 @@ from tensorboardX import SummaryWriter
 
 
 class AvgrageMeter(object):
+
     def __init__(self):
         self.reset()
 
@@ -37,6 +38,7 @@ class AvgrageMeter(object):
 
 
 class ExpMovingAvgrageMeter(object):
+
     def __init__(self, momentum=0.9):
         self.momentum = momentum
         self.reset()
@@ -58,9 +60,7 @@ class DummyDDP(nn.Module):
 
 
 def count_parameters_in_M(model):
-    return np.sum(
-        np.prod(v.size()) for name, v in model.named_parameters()
-        if "auxiliary" not in name) / 1e6
+    return np.sum(np.prod(v.size()) for name, v in model.named_parameters() if "auxiliary" not in name)/1e6
 
 
 def save_checkpoint(state, is_best, save):
@@ -101,10 +101,8 @@ class Logger(object):
         self.rank = rank
         if self.rank == 0:
             log_format = '%(asctime)s %(message)s'
-            logging.basicConfig(stream=sys.stdout,
-                                level=logging.INFO,
-                                format=log_format,
-                                datefmt='%m/%d %I:%M:%S %p')
+            logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                                format=log_format, datefmt='%m/%d %I:%M:%S %p')
             fh = logging.FileHandler(os.path.join(save, 'log.txt'))
             fh.setFormatter(logging.Formatter(log_format))
             logging.getLogger().addHandler(fh)
@@ -113,8 +111,8 @@ class Logger(object):
     def info(self, string, *args):
         if self.rank == 0:
             elapsed_time = time.time() - self.start_time
-            elapsed_time = time.strftime('(Elapsed: %H:%M:%S) ',
-                                         time.gmtime(elapsed_time))
+            elapsed_time = time.strftime(
+                '(Elapsed: %H:%M:%S) ', time.gmtime(elapsed_time))
             if isinstance(string, str):
                 string = elapsed_time + string
             else:
@@ -145,7 +143,7 @@ class Writer(object):
             self.writer.add_histogram(*args, **kwargs)
 
     def add_histogram_if(self, write, *args, **kwargs):
-        if write and False:  # Used for debugging.
+        if write and False:   # Used for debugging.
             self.add_histogram(*args, **kwargs)
 
     def close(self, *args, **kwargs):
@@ -186,29 +184,13 @@ def get_cout(cin, stride):
 
 def kl_balancer_coeff(num_scales, groups_per_scale, fun):
     if fun == 'equal':
-        coeff = torch.cat([
-            torch.ones(groups_per_scale[num_scales - i - 1])
-            for i in range(num_scales)
-        ],
-                          dim=0).cuda()
+        coeff = torch.cat([torch.ones(groups_per_scale[num_scales - i - 1]) for i in range(num_scales)], dim=0).cuda()
     elif fun == 'linear':
-        coeff = torch.cat(
-            [(2**i) * torch.ones(groups_per_scale[num_scales - i - 1])
-             for i in range(num_scales)],
-            dim=0).cuda()
+        coeff = torch.cat([(2 ** i) * torch.ones(groups_per_scale[num_scales - i - 1]) for i in range(num_scales)], dim=0).cuda()
     elif fun == 'sqrt':
-        coeff = torch.cat([
-            np.sqrt(2**i) * torch.ones(groups_per_scale[num_scales - i - 1])
-            for i in range(num_scales)
-        ],
-                          dim=0).cuda()
+        coeff = torch.cat([np.sqrt(2 ** i) * torch.ones(groups_per_scale[num_scales - i - 1]) for i in range(num_scales)], dim=0).cuda()
     elif fun == 'square':
-        coeff = torch.cat([
-            np.square(2**i) / groups_per_scale[num_scales - i - 1] *
-            torch.ones(groups_per_scale[num_scales - i - 1])
-            for i in range(num_scales)
-        ],
-                          dim=0).cuda()
+        coeff = torch.cat([np.square(2 ** i) / groups_per_scale[num_scales - i - 1] * torch.ones(groups_per_scale[num_scales - i - 1]) for i in range(num_scales)], dim=0).cuda()
     else:
         raise NotImplementedError
     # convert min to 1.
@@ -242,7 +224,7 @@ def kl_balancer(kl_all, kl_coeff=1.0, kl_balance=False, alpha_i=None):
         kl_all = torch.stack(kl_all, dim=1)
         kl_vals = torch.mean(kl_all, dim=0)
         kl = torch.sum(kl_all, dim=1)
-        kl_coeffs = torch.ones(size=(len(kl_vals), ))
+        kl_coeffs = torch.ones(size=(len(kl_vals),))
 
     return kl_coeff * kl, kl_coeffs, kl_vals
 
@@ -253,7 +235,7 @@ def kl_coeff(step, total_step, constant_step, min_kl_coeff):
 
 def log_iw(decoder, x, log_q, log_p, crop=False):
     recon = reconstruction_loss(decoder, x, crop)
-    return -recon - log_q + log_p
+    return - recon - log_q + log_p
 
 
 def reconstruction_loss(decoder, x, crop=False):
@@ -262,21 +244,19 @@ def reconstruction_loss(decoder, x, crop=False):
     recon = decoder.log_prob(x)
     if crop:
         recon = recon[:, :, 2:30, 2:30]
-
+    
     if isinstance(decoder, DiscMixLogistic):
-        return -torch.sum(recon, dim=[1, 2])  # summation over RGB is done.
+        return - torch.sum(recon, dim=[1, 2])    # summation over RGB is done.
     else:
-        return -torch.sum(recon, dim=[1, 2, 3])
+        return - torch.sum(recon, dim=[1, 2, 3])
 
 
 def tile_image(batch_image, n):
     assert n * n == batch_image.size(0)
-    channels, height, width = batch_image.size(1), batch_image.size(
-        2), batch_image.size(3)
+    channels, height, width = batch_image.size(1), batch_image.size(2), batch_image.size(3)
     batch_image = batch_image.view(n, n, channels, height, width)
-    batch_image = batch_image.permute(2, 0, 3, 1, 4)  # n, height, n, width, c
-    batch_image = batch_image.contiguous().view(channels, n * height,
-                                                n * width)
+    batch_image = batch_image.permute(2, 0, 3, 1, 4)                              # n, height, n, width, c
+    batch_image = batch_image.contiguous().view(channels, n * height, n * width)
     return batch_image
 
 
@@ -322,8 +302,7 @@ def num_output(dataset):
         return 28 * 28
     elif dataset == 'cifar10':
         return 3 * 32 * 32
-    elif dataset.startswith('celeba') or dataset.startswith(
-            'imagenet') or dataset.startswith('lsun'):
+    elif dataset.startswith('celeba') or dataset.startswith('imagenet') or dataset.startswith('lsun'):
         size = int(dataset.split('_')[-1])
         return 3 * size * size
     elif dataset == 'ffhq':
@@ -337,8 +316,7 @@ def get_input_size(dataset):
         return 32
     elif dataset == 'cifar10':
         return 32
-    elif dataset.startswith('celeba') or dataset.startswith(
-            'imagenet') or dataset.startswith('lsun'):
+    elif dataset.startswith('celeba') or dataset.startswith('imagenet') or dataset.startswith('lsun'):
         size = int(dataset.split('_')[-1])
         return size
     elif dataset == 'ffhq':
@@ -349,8 +327,8 @@ def get_input_size(dataset):
 
 def pre_process(x, num_bits):
     if num_bits != 8:
-        x = torch.floor(x * 255 / 2**(8 - num_bits))
-        x /= (2**num_bits - 1)
+        x = torch.floor(x * 255 / 2 ** (8 - num_bits))
+        x /= (2 ** num_bits - 1)
     return x
 
 
@@ -493,11 +471,7 @@ def get_arch_cells(arch_type):
     return arch_cells
 
 
-def groups_per_scale(num_scales,
-                     num_groups_per_scale,
-                     is_adaptive,
-                     divider=2,
-                     minimum_groups=1):
+def groups_per_scale(num_scales, num_groups_per_scale, is_adaptive, divider=2, minimum_groups=1):
     g = []
     n = num_groups_per_scale
     for s in range(num_scales):
