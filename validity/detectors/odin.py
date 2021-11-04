@@ -102,22 +102,22 @@ class ODINDetector:
         # Normalizing the gradient to binary in {0, 1}
         gradient = torch.ge(inputs.grad.data, 0)
         gradient = (gradient.float() - 0.5) * 2
-        if True:
-            gradient.index_copy_(
-                1,
-                torch.LongTensor([0]).cuda(),
-                gradient.index_select(1,
-                                      torch.LongTensor([0]).cuda()) / (0.2023))
-            gradient.index_copy_(
-                1,
-                torch.LongTensor([1]).cuda(),
-                gradient.index_select(1,
-                                      torch.LongTensor([1]).cuda()) / (0.1994))
-            gradient.index_copy_(
-                1,
-                torch.LongTensor([2]).cuda(),
-                gradient.index_select(1,
-                                      torch.LongTensor([2]).cuda()) / (0.2010))
+        # if True:
+        #     gradient.index_copy_(
+        #         1,
+        #         torch.LongTensor([0]).cuda(),
+        #         gradient.index_select(1,
+        #                               torch.LongTensor([0]).cuda()) / (0.2023))
+        #     gradient.index_copy_(
+        #         1,
+        #         torch.LongTensor([1]).cuda(),
+        #         gradient.index_select(1,
+        #                               torch.LongTensor([1]).cuda()) / (0.1994))
+        #     gradient.index_copy_(
+        #         1,
+        #         torch.LongTensor([2]).cuda(),
+        #         gradient.index_select(1,
+        #                               torch.LongTensor([2]).cuda()) / (0.2010))
 
         # Adding small perturbations to images
         tempInputs = torch.add(inputs.data,
@@ -132,7 +132,7 @@ class ODINDetector:
 
 
 def train_odin(location,
-               data_root='./',
+               data_root='./datasets/',
                cuda_idx=0,
                magnitude=1e-2,
                temperature=1000.):
@@ -140,7 +140,10 @@ def train_odin(location,
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    network = ResNet34(10)
+    network = ResNet34(
+        10,
+        transforms.Normalize((0.4914, 0.4822, 0.4465),
+                             (0.2023, 0.1994, 0.2010)))
     weights = torch.load(location, map_location=f'cuda:{cuda_idx}')
     network.load_state_dict(weights)
     network.cuda()
@@ -149,21 +152,19 @@ def train_odin(location,
 
     # Note: The transform is the per channel mean and std dev of
     # cifar10 training set.
-    in_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010)),
-    ])
 
     in_test_loader = torch.utils.data.DataLoader(datasets.CIFAR10(
-        root=data_root, train=False, download=True, transform=in_transform),
+        root=data_root,
+        train=False,
+        download=True,
+        transform=transforms.ToTensor()),
                                                  batch_size=64,
                                                  shuffle=True)
 
     out_dataset = datasets.SVHN(root=data_root,
                                 split='test',
                                 download=True,
-                                transform=in_transform)
+                                transform=transforms.ToTensor())
     out_test_loader = torch.utils.data.DataLoader(out_dataset,
                                                   batch_size=64,
                                                   shuffle=True)
@@ -184,7 +185,7 @@ def train_odin(location,
     return results
 
 
-def train_multiple_odin(weights_path, data_root='./', cuda_idx=0):
+def train_multiple_odin(weights_path, data_root='./datasets/', cuda_idx=0):
     magnitudes = [
         0, 0.0005, 0.001, 0.0014, 0.002, 0.0024, 0.005, 0.01, 0.05, 0.1, 0.2
     ]

@@ -159,9 +159,10 @@ class PreActBottleneck(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10):
+    def __init__(self, block, num_blocks, num_classes=10, in_transform=None):
         super(ResNet, self).__init__()
         self.in_planes = 64
+        self.in_transform = in_transform
 
         self.conv1 = conv3x3(3, 64)
         self.bn1 = nn.BatchNorm2d(64)
@@ -180,6 +181,8 @@ class ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        if self.in_transform:
+            x = self.in_transform(x)
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
@@ -193,6 +196,8 @@ class ResNet(nn.Module):
     # function to extact the multiple features
     def feature_list(self, x):
         out_list = []
+        if self.in_transform:
+            x = self.in_transform(x)
         out = F.relu(self.bn1(self.conv1(x)))
         out_list.append(out)
         out = self.layer1(out)
@@ -210,6 +215,8 @@ class ResNet(nn.Module):
 
     # function to extact a specific feature
     def intermediate_forward(self, x, layer_index):
+        if self.in_transform:
+            x = self.in_transform(x)
         out = F.relu(self.bn1(self.conv1(x)))
         if layer_index == 1:
             out = self.layer1(out)
@@ -229,6 +236,8 @@ class ResNet(nn.Module):
 
     # function to extact the penultimate features
     def penultimate_forward(self, x):
+        if self.in_transform:
+            x = self.in_transform(x)
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
@@ -244,8 +253,10 @@ def ResNet18(num_c):
     return ResNet(PreActBlock, [2, 2, 2, 2], num_classes=num_c)
 
 
-def ResNet34(num_c):
-    return ResNet(BasicBlock, [3, 4, 6, 3], num_classes=num_c)
+def ResNet34(num_c, in_transform=None):
+    return ResNet(BasicBlock, [3, 4, 6, 3],
+                  num_classes=num_c,
+                  in_transform=in_transform)
 
 
 def ResNet50():
