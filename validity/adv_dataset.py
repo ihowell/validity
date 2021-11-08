@@ -68,6 +68,8 @@ def construct_dataset(dataset, attack, net_type, weights_location, data_root='./
         network.load_state_dict(torch.load(weights_location, map_location=f'cuda:0'))
 
         if dataset == 'cifar10':
+            ds_mean = (0.4914, 0.4822, 0.4465)
+            ds_std = (0.2023, 0.1994, 0.2010)
             if attack == 'fgsm':
                 random_noise_size = 0.25 / 4 * 0.2
             elif attack == 'bim':
@@ -95,7 +97,10 @@ def construct_dataset(dataset, attack, net_type, weights_location, data_root='./
         data = data.cuda()
         labels = labels.cuda()
 
-        noisy_d = torch.add(data, torch.randn(data.shape).cuda(), alpha=random_noise_size)
+        mean = np.ones(data.shape) * torch.tensor(ds_mean)
+        std = np.ones(data.shape) * torch.tensor(ds_std)
+        noise = torch.normal(mean, std).cuda()
+        noisy_d = torch.add(data, noise, alpha=random_noise_size)
         noisy_d = torch.clamp(noisy_d, 0., 1.)
 
         if attack == 'fgsm':
