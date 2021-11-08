@@ -15,11 +15,7 @@ from tqdm import tqdm
 from validity.classifiers.resnet import ResNet34
 
 
-def construct_dataset(dataset,
-                      attack,
-                      net_type,
-                      weights_location,
-                      data_root='./datasets'):
+def construct_dataset(dataset, attack, net_type, weights_location, data_root='./datasets'):
     """Construct an adversarial dataset.
 
     Args:
@@ -30,14 +26,13 @@ def construct_dataset(dataset,
         adv_noise = 0.10
     elif attack == 'bim':
         adv_noise = 0.02
+    elif attack == 'cwl2':
+        if dataset == 'cifar10':
+            confidence = 7.439  # Average logit marginal in training set
 
     if net_type == 'resnet':
-        network = ResNet34(
-            10,
-            transforms.Normalize((0.4914, 0.4822, 0.4465),
-                                 (0.2023, 0.1994, 0.2010)))
-        network.load_state_dict(
-            torch.load(weights_location, map_location=f'cuda:0'))
+        network = ResNet34(10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
+        network.load_state_dict(torch.load(weights_location, map_location=f'cuda:0'))
 
         min_pixel = -2.42906570435
         max_pixel = 2.75373125076
@@ -51,15 +46,10 @@ def construct_dataset(dataset,
                 random_noise_size = 0.05 / 2 * 0.2
 
     if dataset == 'cifar10':
-        test_dataset = datasets.CIFAR10(root=data_root,
-                                        train=False,
-                                        download=True,
-                                        transform=transforms.ToTensor())
+        test_dataset = datasets.CIFAR10(root=data_root, train=False, download=True, transform=transforms.ToTensor())
         n_classes = 10
 
-    test_loader = torch.utils.data.DataLoader(test_dataset,
-                                              batch_size=64,
-                                              shuffle=False)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=64, shuffle=False)
     network.cuda()
     network.eval()
 
@@ -75,18 +65,11 @@ def construct_dataset(dataset,
         data = data.cuda()
         labels = labels.cuda()
 
-        noisy_d = torch.add(data,
-                            torch.randn(data.shape).cuda(),
-                            alpha=random_noise_size)
+        noisy_d = torch.add(data, torch.randn(data.shape).cuda(), alpha=random_noise_size)
         noisy_d = torch.clamp(noisy_d, min_pixel, max_pixel)
 
         if attack == 'fgsm':
-            adv_batch = fast_gradient_method(network,
-                                             data,
-                                             adv_noise,
-                                             np.inf,
-                                             clip_min=0.,
-                                             clip_max=1.)
+            adv_batch = fast_gradient_method(network, data, adv_noise, np.inf, clip_min=0., clip_max=1.)
         elif attack == 'bim':
             adv_batch = projected_gradient_descent(network,
                                                    data,
@@ -99,7 +82,7 @@ def construct_dataset(dataset,
                                                    clip_min=0.,
                                                    clip_max=1.)
         elif attack == 'cwl2':
-            adv_batch = carlini_wagner_l2(network, data, n_classes)
+            adv_batch = carlini_wagner_l2(network, data, n_classes, confidence=confidence)
         adv_batch = adv_batch
 
         logits = network(data)
@@ -109,18 +92,11 @@ def construct_dataset(dataset,
         adv_logits = network(adv_batch)
         adv_preds = torch.argmax(adv_logits, 1)
 
-        accuracy.append(
-            torch.mean(torch.where(preds == labels, 1.,
-                                   0.)).cpu().detach().numpy())
-        noise_accuracy.append(
-            torch.mean(torch.where(noise_preds == labels, 1.,
-                                   0.)).cpu().detach().numpy())
-        adv_accuracy.append(
-            torch.mean(torch.where(adv_preds == labels, 1.,
-                                   0.)).cpu().detach().numpy())
+        accuracy.append(torch.mean(torch.where(preds == labels, 1., 0.)).cpu().detach().numpy())
+        noise_accuracy.append(torch.mean(torch.where(noise_preds == labels, 1., 0.)).cpu().detach().numpy())
+        adv_accuracy.append(torch.mean(torch.where(adv_preds == labels, 1., 0.)).cpu().detach().numpy())
 
-        indices = torch.where(
-            torch.logical_and(noise_preds == labels, adv_preds != labels))[0]
+        indices = torch.where(torch.logical_and(noise_preds == labels, adv_preds != labels))[0]
         data = torch.index_select(data, 0, indices)
         noisy_d = torch.index_select(noisy_d, 0, indices)
         adv_batch = torch.index_select(adv_batch, 0, indices)
@@ -137,12 +113,9 @@ def construct_dataset(dataset,
     print(f'Adversarial Accuracy: {np.mean(adv_accuracy)}')
     print(f'Data after filtering: {clean_data.shape[0]}')
 
-    clean_ds_path = pathlib.Path(
-        'adv_datasets') / f'{dataset}_{attack}_clean_{net_type}.npy'
-    adv_ds_path = pathlib.Path(
-        'adv_datasets') / f'{dataset}_{attack}_adv_{net_type}.npy'
-    noisy_ds_path = pathlib.Path(
-        'adv_datasets') / f'{dataset}_{attack}_noise_{net_type}.npy'
+    clean_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_clean_{net_type}.npy'
+    adv_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_adv_{net_type}.npy'
+    noisy_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_noise_{net_type}.npy'
 
     adv_ds_path.parent.mkdir(exist_ok=True, parents=True)
     np.save(clean_ds_path, clean_data)
@@ -151,16 +124,13 @@ def construct_dataset(dataset,
 
 
 def load_adv_dataset(dataset, attack, net_type):
-    clean_ds_path = pathlib.Path(
-        'adv_datasets') / f'{dataset}_{attack}_clean_{net_type}.npy'
-    adv_ds_path = pathlib.Path(
-        'adv_datasets') / f'{dataset}_{attack}_adv_{net_type}.npy'
-    noisy_ds_path = pathlib.Path(
-        'adv_datasets') / f'{dataset}_{attack}_noise_{net_type}.npy'
+    clean_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_clean_{net_type}.npy'
+    adv_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_adv_{net_type}.npy'
+    noisy_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_noise_{net_type}.npy'
 
-    assert clean_ds_path.exists()
-    assert adv_ds_path.exists()
-    assert noisy_ds_path.exists()
+    assert clean_ds_path.exists(), f'{clean_ds_path} does not exist'
+    assert adv_ds_path.exists(), f'{adv_ds_path} does not exist'
+    assert noisy_ds_path.exists(), f'{noisy_ds_path} does not exist'
 
     clean_data = np.load(clean_ds_path)
     adv_data = np.load(adv_ds_path)

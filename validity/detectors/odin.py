@@ -24,15 +24,17 @@ class ODINDetector:
         self.noise_magnitude = noise_magnitude
         self.temper = temper
 
-        self.threshold = None
+        self.lr = None
 
-    def set_threshold(self, threshold):
-        self.threshold = threshold
-
-    def forward(self, inputs):
-        assert self.threshold is not None
+    def predict(self, inputs):
+        assert self.lr is not None
         score = self.score(inputs)
-        return score > threshold
+        return -self.lr.predict(score) + 1.
+
+    def predict_proba(self, inputs):
+        assert self.lr is not None
+        score = self.score(inputs)
+        return -self.lr.predict_proba(score) + 1.
 
     def evaluate(self, in_loader, out_loader):
         self.network.eval()
@@ -50,27 +52,16 @@ class ODINDetector:
 
         val_scores = np.concatenate([val_score_in, val_score_out])
         test_scores = np.concatenate([test_score_in, test_score_out])
-        val_labels = np.concatenate(
-            [np.ones(val_score_in.shape[0]),
-             np.zeros(val_score_out.shape[0])])
-        test_labels = np.concatenate([
-            np.ones(test_score_in.shape[0]),
-            np.zeros(test_score_out.shape[0])
-        ])
+        val_labels = np.concatenate([np.ones(val_score_in.shape[0]), np.zeros(val_score_out.shape[0])])
+        test_labels = np.concatenate([np.ones(test_score_in.shape[0]), np.zeros(test_score_out.shape[0])])
 
         res = {}
 
-        fpr, tpr, thresholds = roc_curve(val_labels, val_scores)
-        best_th = thresholds[0]
-        best_acc = (1. - fpr[0] + tpr[0]) / 2.
-        for fr, tr, th in zip(fpr, tpr, thresholds):
-            acc = (1. - fr + tr) / 2.
-            if best_acc < acc:
-                best_acc = acc
-                best_th = th
-        self.threshold = best_th
+        self.lr = LogisticRegressionCV(n_jobs=-1).fit(val_scores, val_labels)
+        test_probs = self.lr.predict_proba(test_scores)[:, 1]
+        test_preds = self.lr.predict(test_scores)
 
-        fpr, tpr, thresholds = roc_curve(test_labels, test_scores)
+        fpr, tpr, thresholds = roc_curve(test_labels, test_probs)
         res['plot'] = (fpr, tpr)
         res['auc_score'] = auc(fpr, tpr)
         for f, t in zip(fpr, tpr):
@@ -78,73 +69,44 @@ class ODINDetector:
                 res['fpr_at_tpr_95'] = f
                 break
 
-        res['threshold'] = self.threshold
-        res['accuracy'] = accuracy_score(test_labels,
-                                         test_scores > self.threshold)
-        res['precision'] = precision_score(test_labels,
-                                           test_scores > self.threshold)
-        res['recall'] = recall_score(test_labels, test_scores > self.threshold)
+        res['accuracy'] = accuracy_score(test_labels, test_preds)
+        res['precision'] = precision_score(test_labels, test_preds)
+        res['recall'] = recall_score(test_labels, test_preds)
         return res
 
     def score(self, images):
         images = images.cuda()
-
         inputs = Variable(images, requires_grad=True)
+        outputs = self.network(inputs)
 
-        batch_outputs = self.network(inputs)
+        if self.noise_magnitude != 0.:
+            # Using temperature scaling
+            outputs = outputs / self.temper
+            labels = outputs.data.max(1)[1]
+            loss = self.criterion(outputs, labels)
+            loss.backward()
 
-        # Using temperature scaling
-        outputs = batch_outputs / self.temper
-        labels = outputs.data.max(1)[1]
-        loss = self.criterion(outputs, labels)
-        loss.backward()
+            # Normalizing the gradient to binary in {0, 1}
+            gradient = torch.ge(inputs.grad.data, 0)
+            gradient = (gradient.float() - 0.5) * 2
 
-        # Normalizing the gradient to binary in {0, 1}
-        gradient = torch.ge(inputs.grad.data, 0)
-        gradient = (gradient.float() - 0.5) * 2
-        # if True:
-        #     gradient.index_copy_(
-        #         1,
-        #         torch.LongTensor([0]).cuda(),
-        #         gradient.index_select(1,
-        #                               torch.LongTensor([0]).cuda()) / (0.2023))
-        #     gradient.index_copy_(
-        #         1,
-        #         torch.LongTensor([1]).cuda(),
-        #         gradient.index_select(1,
-        #                               torch.LongTensor([1]).cuda()) / (0.1994))
-        #     gradient.index_copy_(
-        #         1,
-        #         torch.LongTensor([2]).cuda(),
-        #         gradient.index_select(1,
-        #                               torch.LongTensor([2]).cuda()) / (0.2010))
+            # Adding small perturbations to images
+            tempInputs = torch.add(inputs.data, gradient, alpha=-self.noise_magnitude)
+            outputs = self.network(tempInputs)
 
-        # Adding small perturbations to images
-        tempInputs = torch.add(inputs.data,
-                               gradient,
-                               alpha=-self.noise_magnitude)
-
-        outputs = self.network(tempInputs)
         outputs = outputs / self.temper
         soft_out = F.softmax(outputs, dim=1)
         soft_out, _ = torch.max(soft_out.data, dim=1, keepdim=True)
         return soft_out.data.cpu()
 
 
-def train_odin(location,
-               data_root='./datasets/',
-               cuda_idx=0,
-               magnitude=1e-2,
-               temperature=1000.):
+def train_odin(net_type, weights_path, data_root='./datasets/', cuda_idx=0, magnitude=1e-2, temperature=1000.):
     from validity.classifiers.resnet import ResNet34
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    network = ResNet34(
-        10,
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010)))
-    weights = torch.load(location, map_location=f'cuda:{cuda_idx}')
+    network = ResNet34(10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
+    weights = torch.load(weights_path, map_location=f'cuda:{cuda_idx}')
     network.load_state_dict(weights)
     network.cuda()
 
@@ -153,23 +115,17 @@ def train_odin(location,
     # Note: The transform is the per channel mean and std dev of
     # cifar10 training set.
 
-    in_test_loader = torch.utils.data.DataLoader(datasets.CIFAR10(
-        root=data_root,
-        train=False,
-        download=True,
-        transform=transforms.ToTensor()),
+    in_test_loader = torch.utils.data.DataLoader(datasets.CIFAR10(root=data_root,
+                                                                  train=False,
+                                                                  download=True,
+                                                                  transform=transforms.ToTensor()),
                                                  batch_size=64,
                                                  shuffle=True)
 
-    out_dataset = datasets.SVHN(root=data_root,
-                                split='test',
-                                download=True,
-                                transform=transforms.ToTensor())
-    out_test_loader = torch.utils.data.DataLoader(out_dataset,
-                                                  batch_size=64,
-                                                  shuffle=True)
+    out_dataset = datasets.SVHN(root=data_root, split='test', download=True, transform=transforms.ToTensor())
+    out_test_loader = torch.utils.data.DataLoader(out_dataset, batch_size=64, shuffle=True)
     results = odin.evaluate(in_test_loader, out_test_loader)
-    save_path = pathlib.Path('odin', 'resnet34', 'cifar10', 'ood.pt')
+    save_path = pathlib.Path('odin', f'odin_{net_type}_cifar10_svhn_{magnitude}_{temperature}.pt')
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(odin, save_path)
     print(f'Magnitude {magnitude} temperature {temperature}:')
@@ -182,29 +138,60 @@ def train_odin(location,
             else:
                 continue
         print(f'{result_name:20}: {result:.4f}')
-    return results
+    return odin, results
 
 
-def train_multiple_odin(weights_path, data_root='./datasets/', cuda_idx=0):
-    magnitudes = [
-        0, 0.0005, 0.001, 0.0014, 0.002, 0.0024, 0.005, 0.01, 0.05, 0.1, 0.2
-    ]
-    result_table = [['Magnitude', 'FPR at TPR=0.95', 'AUC Score']]
+def train_multiple_odin(net_type, weights_path, data_root='./datasets/', cuda_idx=0, latex_print=False):
+    magnitudes = [0, 0.0005, 0.001, 0.0014, 0.002, 0.0024, 0.005, 0.007, 0.01, 0.014, 0.02, 0.05]
+    result_table = [['Magnitude', 'AUC Score', 'FPR at TPR=0.95']]
+
+    best_detector = None
+    best_auc = None
 
     for magnitude in magnitudes:
-        res = train_odin(weights_path, data_root, cuda_idx, magnitude)
+        detector, res = train_odin(net_type, weights_path, data_root, cuda_idx, magnitude)
         fpr, tpr = res['plot']
         plt.plot(fpr, tpr, label=str(magnitude))
-        row = [magnitude, res['fpr_at_tpr_95'], res['auc_score']]
+        row = [magnitude, res['auc_score'], res['fpr_at_tpr_95']]
         result_table.append(row)
+
+        if best_detector is None:
+            best_detector = detector
+            best_auc = res['auc_score']
+        elif res['auc_score'] > best_auc:
+            best_detector = detector
+            best_auc = res['auc_score']
 
     plt.xlabel('FPR')
     plt.ylabel('TPR')
     plt.legend()
+    plt.savefig('odin/ood_results.png')
 
-    plt.savefig('results.png')
+    save_path = pathlib.Path('odin', f'odin_{net_type}_cifar10_svhn_best.pt')
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(best_detector, save_path)
 
-    print(tabulate(result_table))
+    if latex_print:
+        print(' & '.join(result_table[0]) + '\\\\')
+        for row in result_table[1:]:
+            magnitude = str(row[0])
+            scores = [f'{x:.4f}' for x in row[1:]]
+            new_row = [magnitude] + scores
+            print(' & '.join(new_row) + '\\\\')
+    else:
+        print(tabulate(result_table))
+
+
+def load_odin(net_type, in_dataset, out_dataset, magnitude, temperature):
+    save_path = pathlib.Path('odin', f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}.pt')
+    assert save_path.exists(), f'{save_path} does not exist'
+    return torch.load(save_path)
+
+
+def load_best_odin(net_type, in_dataset, out_dataset):
+    save_path = pathlib.Path('odin', f'odin_{net_type}_cifar10_svhn_best.pt')
+    assert save_path.exists(), f'{save_path} does not exist'
+    return torch.load(save_path)
 
 
 if __name__ == '__main__':

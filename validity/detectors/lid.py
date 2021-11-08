@@ -28,9 +28,17 @@ class LIDDetector:
 
         self.feature_list = None
         self.num_outputs = None
-        self.sample_mean = None
-        self.precision = None
         self.lr = None
+
+    def predict(self, x):
+        assert self.lr is not None
+        scores = self.score(x)
+        return -self.lr.predict(scores) + 1.
+
+    def predict_proba(self, x):
+        assert self.lr is not None
+        scores = self.score(x)
+        return -self.lr.predict_proba(scores) + 1.
 
     def evaluate(self, in_test_loader, out_test_loader, noise_test_loader):
         self.model.eval()
@@ -173,7 +181,7 @@ def train_lid_adv(net_type, weights_path, adv_attack, data_root='./datasets', cu
     noise_test_loader = np_loader(noisy_data, True)
     results = detector.evaluate(in_test_loader, out_test_loader, noise_test_loader)
 
-    save_path = pathlib.Path('lid', f'{net_type}_cifar10_{k}.pt')
+    save_path = pathlib.Path('lid', f'lid_{net_type}_cifar10_{adv_attack}_{k}.pt')
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(detector, save_path)
     print(f'K = {k}:')
@@ -186,27 +194,59 @@ def train_lid_adv(net_type, weights_path, adv_attack, data_root='./datasets', cu
             else:
                 continue
         print(f'{result_name:20}: {result:.4f}')
-    return results
+    return detector, results
 
 
-def train_multiple_lid_adv(net_type, weights_path, adv_attack, data_root='./datasets/', cuda_idx=0):
+def train_multiple_lid_adv(net_type, weights_path, adv_attack, data_root='./datasets/', cuda_idx=0, latex_print=False):
     k_list = range(10, 100, 10)
-    result_table = [['K', 'FPR at TPR=0.95', 'AUC Score']]
+    result_table = [['K', 'AUC Score', 'FPR at TPR=0.95']]
+
+    best_detector = None
+    best_auc = None
 
     for k in k_list:
-        res = train_lid_adv(net_type, weights_path, adv_attack, data_root=data_root, cuda_idx=cuda_idx, k=k)
+        detector, res = train_lid_adv(net_type, weights_path, adv_attack, data_root=data_root, cuda_idx=cuda_idx, k=k)
         fpr, tpr = res['plot']
         plt.plot(fpr, tpr, label=str(k))
-        row = [k, res['fpr_at_tpr_95'], res['auc_score']]
+        row = [k, res['auc_score'], res['fpr_at_tpr_95']]
         result_table.append(row)
+
+        if best_detector is None:
+            best_detector = detector
+            best_auc = res['auc_score']
+        elif res['auc_score'] > best_auc:
+            best_detector = detector
+            best_auc = res['auc_score']
+
+    save_path = pathlib.Path('lid', f'lid_{net_type}_cifar10_{adv_attack}_best.pt')
+    torch.save(best_detector, save_path)
 
     plt.xlabel('FPR')
     plt.ylabel('TPR')
     plt.legend()
+    plt.savefig('lid/adv_results.png')
 
-    plt.savefig('adv_results.png')
+    if latex_print:
+        print(' & '.join(result_table[0]) + '\\\\')
+        for row in result_table[1:]:
+            magnitude = str(row[0])
+            scores = [f'{x:.4f}' for x in row[1:]]
+            new_row = [magnitude] + scores
+            print(' & '.join(new_row) + '\\\\')
+    else:
+        print(tabulate(result_table))
 
-    print(tabulate(result_table))
+
+def load_lid(net_type, dataset, adv_attack, k):
+    save_path = pathlib.Path('lid', f'lid_{net_type}_{dataset}_{adv_attack}_{k}.pt')
+    assert save_path.exists()
+    return torch.load(save_path)
+
+
+def load_best_lid(net_type, dataset, adv_attack):
+    save_path = pathlib.Path('lid', f'lid_{net_type}_{dataset}_{adv_attack}_best.pt')
+    assert save_path.exists()
+    return torch.load(save_path)
 
 
 if __name__ == '__main__':
