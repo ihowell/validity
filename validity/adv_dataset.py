@@ -15,6 +15,39 @@ from tqdm import tqdm
 from validity.classifiers.resnet import ResNet34
 
 
+def construct_example(dataset, attack, net_type, weights_location, data_root='./datasets'):
+    network = ResNet34(10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
+    network.load_state_dict(torch.load(weights_location, map_location=f'cuda:0'))
+    network = network.cuda()
+
+    confidence = 7.439
+    test_dataset = datasets.CIFAR10(root=data_root, train=False, download=True, transform=transforms.ToTensor())
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=64, shuffle=False)
+    for data, label in test_loader:
+        data = data.cuda()
+        adv_data = carlini_wagner_l2(network, data, 10, confidence=confidence, clip_min=0., clip_max=1.)
+
+        logits = network(data)
+        adv_logits = network(adv_data)
+
+        print(f'{label=}')
+        print(f'{logits.argmax(axis=1)=}')
+        print(f'{adv_logits.argmax(axis=1)=}')
+        logits = logits.sort()[0]
+        adv_logits = adv_logits.sort()[0]
+        marginal = logits[:, -1] - logits[:, -2]
+        adv_marginal = adv_logits[:, -1] - adv_logits[:, -2]
+        print(f'{marginal=}')
+        print(f'{adv_marginal=}')
+
+        data = data.cpu().detach().numpy()
+        adv_data = adv_data.cpu().detach().numpy()
+        break
+    img = np.transpose(np.concatenate([data, adv_data], 2)[0], (1, 2, 0))
+    plt.imshow(img)
+    plt.show()
+
+
 def construct_dataset(dataset, attack, net_type, weights_location, data_root='./datasets'):
     """Construct an adversarial dataset.
 
@@ -33,9 +66,6 @@ def construct_dataset(dataset, attack, net_type, weights_location, data_root='./
     if net_type == 'resnet':
         network = ResNet34(10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
         network.load_state_dict(torch.load(weights_location, map_location=f'cuda:0'))
-
-        min_pixel = -2.42906570435
-        max_pixel = 2.75373125076
 
         if dataset == 'cifar10':
             if attack == 'fgsm':
@@ -66,7 +96,7 @@ def construct_dataset(dataset, attack, net_type, weights_location, data_root='./
         labels = labels.cuda()
 
         noisy_d = torch.add(data, torch.randn(data.shape).cuda(), alpha=random_noise_size)
-        noisy_d = torch.clamp(noisy_d, min_pixel, max_pixel)
+        noisy_d = torch.clamp(noisy_d, 0., 1.)
 
         if attack == 'fgsm':
             adv_batch = fast_gradient_method(network, data, adv_noise, np.inf, clip_min=0., clip_max=1.)
@@ -140,4 +170,4 @@ def load_adv_dataset(dataset, attack, net_type):
 
 
 if __name__ == '__main__':
-    fire.Fire(construct_dataset)
+    fire.Fire()
