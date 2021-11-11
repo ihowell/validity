@@ -14,6 +14,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 from torchvision import datasets, transforms
+from tensorboardX import SummaryWriter
 
 from validity.generators.nvae.model import load_nvae
 from validity.classifiers import ResNet34
@@ -25,6 +26,7 @@ def xgems(encode,
           x_start,
           y_target,
           class_coef,
+          writer,
           tb_writer=None,
           strategy=None,
           seed=None,
@@ -39,9 +41,9 @@ def xgems(encode,
     """
     x_start = x_start.cuda()
     class_coef = torch.tensor(class_coef).cuda()
-    z_init = encode(x_start)
-    z = z_init.detach().clone()
-    x_reencode_start = decode(z)
+    zs_init = encode(x_start)
+    zs = [z.detach().clone().requires_grad_(True) for z in zs_init]
+    x_reencode_start = decode(zs)
     criterion = nn.CrossEntropyLoss()
     y_start = torch.argmax(classifier(x_reencode_start), 1)[0]
 
@@ -79,21 +81,31 @@ def xgems(encode,
             'path_viz': tf.concat([x_start, x], 2)
         }
 
-    optimizer = optim.Adam([z])
+    optimizer = optim.Adam(zs, lr=1e-3)
 
-    for step in tqdm(range(200)):
+    for step in range(200):
         optimizer.zero_grad()
-        x = decode(z)
+        x = decode(zs)
         logits = classifier(x)
         decode_loss = torch.mean((x_start - x)**2, (1, 2, 3))
         class_loss = criterion(logits, y_target.cuda())
-        loss = decode_loss + class_coef * class_loss
+        # loss = decode_loss + class_coef * class_loss
+        loss = class_loss
+        writer.add_scalar('loss', loss, step)
+        writer.add_scalar('class loss', class_loss, step)
+        writer.add_scalar('decode loss', decode_loss, step)
+        writer.add_scalar('classification', torch.argmax(logits, dim=1)[0], step)
+        sorted_logits = logits.sort(dim=1)
+        marginal = sorted_logits[-1] - sorted_logits[-2]
+        writer.add_scalar('marginal', torch.argmax(logits, dim=1)[0], step)
+        img = torch.cat([x_start, x], 3)[0]
+        writer.add_image('xgem', torch.tensor(img), step)
         loss.backward()
         optimizer.step()
 
     # z = am(loss_fn, z, tb_writer=tb_writer, prefix=prefix, **kwargs)
 
-    return x_reencode_start, decode(z)
+    return x_reencode_start, decode(zs)
 
 
 def run_xgems(dataset, weights_path, generator_checkpoint, class_coef=1.0, data_root='./datasets/', cuda_idx=0):
@@ -120,33 +132,22 @@ def run_xgems(dataset, weights_path, generator_checkpoint, class_coef=1.0, data_
 
     target_label = (label + 1) % 10
 
-    # logits = nvae.sample(1, 1.)
-    # img = nvae.decoder_output(logits).sample()
-    # plt.imshow(np.transpose(img[0].cpu().detach().numpy(), (1, 2, 0)))
-    # plt.show()
-    # exit()
-
     def encode(x):
-        z = nvae.encode(x)
-        return z
+        z, combiner_cells_s = nvae.encode(x)
+        return [z] + combiner_cells_s
 
-    def decode(z):
-        logits = nvae.decode(z, 1.)
+    def decode(zs):
+        z, combiner_cells_s = zs[0], zs[1:]
+        logits = nvae.decode(z, combiner_cells_s, 1.)
         return nvae.decoder_output(logits).sample()
 
-    outs = nvae.forward(data.cuda())
-    xx = nvae.decoder_output(outs[0]).sample()
+    print('label', label)
+    print('target label', target_label)
 
-    z, combiner_cells_s = nvae.encode(data.cuda())
-    x_hats = [nvae.decode(z, combiner_cells_s, t) for t in [0.7, 0.8, 0.9, 1.0]]
-    x_hats = [nvae.decoder_output(x_hat).sample() for x_hat in x_hats]
-    plt.imshow(np.transpose(torch.cat([data.cuda(), *x_hats, xx], 3)[0].cpu().detach().numpy(), (1, 2, 0)))
-    plt.show()
-    exit()
-
-    x, x_hat = xgems(encode, decode, classifier, data, label, target_label)
-    plt.imshow(np.transpose(torch.cat([x, x_hat], 3)[0].cpu().detach().numpy(), (1, 2, 0)))
-    plt.show()
+    writer = SummaryWriter()
+    x, x_hat = xgems(encode, decode, classifier, data, target_label, class_coef, writer)
+    # plt.imshow(np.transpose(torch.cat([x, x_hat], 3)[0].cpu().detach().numpy(), (1, 2, 0)))
+    # plt.show()
 
     # sample_per_class = {}
     # for i in range(info.features['label'].num_classes):
