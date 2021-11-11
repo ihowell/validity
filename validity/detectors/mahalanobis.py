@@ -194,34 +194,34 @@ class MahalanobisDetector:
         for data, target in in_train_loader:
             total += data.size(0)
             data = data.cuda()
-            data = Variable(data, volatile=True)
-            output, out_features = self.model.feature_list(data)
+            with torch.no_grad():
+                output, out_features = self.model.feature_list(data)
 
-            # get hidden features
-            for i in range(self.num_outputs):
-                out_features[i] = out_features[i].view(out_features[i].size(0), out_features[i].size(1), -1)
-                out_features[i] = torch.mean(out_features[i].data, 2)
+                # get hidden features
+                for i in range(self.num_outputs):
+                    out_features[i] = out_features[i].view(out_features[i].size(0), out_features[i].size(1), -1)
+                    out_features[i] = torch.mean(out_features[i].data, 2)
 
-            # compute the accuracy
-            pred = output.data.max(1)[1]
-            equal_flag = pred.eq(target.cuda()).cpu()
-            correct += equal_flag.sum()
+                # compute the accuracy
+                pred = output.data.max(1)[1]
+                equal_flag = pred.eq(target.cuda()).cpu()
+                correct += equal_flag.sum()
 
-            # construct the sample matrix
-            for i in range(data.size(0)):
-                label = target[i]
-                if num_sample_per_class[label] == 0:
-                    out_count = 0
-                    for out in out_features:
-                        list_features[out_count][label] = out[i].view(1, -1)
-                        out_count += 1
-                else:
-                    out_count = 0
-                    for out in out_features:
-                        list_features[out_count][label] \
-                            = torch.cat((list_features[out_count][label], out[i].view(1, -1)), 0)
-                        out_count += 1
-                num_sample_per_class[label] += 1
+                # construct the sample matrix
+                for i in range(data.size(0)):
+                    label = target[i]
+                    if num_sample_per_class[label] == 0:
+                        out_count = 0
+                        for out in out_features:
+                            list_features[out_count][label] = out[i].view(1, -1)
+                            out_count += 1
+                    else:
+                        out_count = 0
+                        for out in out_features:
+                            list_features[out_count][label] \
+                                = torch.cat((list_features[out_count][label], out[i].view(1, -1)), 0)
+                            out_count += 1
+                    num_sample_per_class[label] += 1
 
         sample_class_mean = []
         out_count = 0

@@ -5,20 +5,19 @@
 # for NVAE. To view a copy of this license, see the LICENSE file.
 # ---------------------------------------------------------------
 
-
 import time
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from neural_operations import OPS, EncCombinerCell, DecCombinerCell, Conv2D, get_skip_connection, SE
-from neural_ar_operations import ARConv2d, ARInvertedResidual, MixLogCDFParam, mix_log_cdf_flow
-from neural_ar_operations import ELUConv as ARELUConv
+from .neural_operations import OPS, EncCombinerCell, DecCombinerCell, Conv2D, get_skip_connection, SE
+from .neural_ar_operations import ARConv2d, ARInvertedResidual, MixLogCDFParam, mix_log_cdf_flow
+from .neural_ar_operations import ELUConv as ARELUConv
 from torch.distributions.bernoulli import Bernoulli
 
-from utils import get_stride_for_cell_type, get_input_size, groups_per_scale
-from distributions import Normal, DiscMixLogistic, NormalDecoder
-from thirdparty.inplaced_sync_batchnorm import SyncBatchNormSwish
+from .utils import get_stride_for_cell_type, get_input_size, groups_per_scale, get_arch_cells
+from .distributions import Normal, DiscMixLogistic, NormalDecoder
+from .thirdparty.inplaced_sync_batchnorm import SyncBatchNormSwish
 
 CHANNEL_MULT = 2
 
@@ -70,8 +69,14 @@ class CellAR(nn.Module):
             self.param = MixLogCDFParam(num_z, num_mix=3, num_ftr=self.conv.hidden_dim, mirror=mirror)
         else:
             # 0.1 helps bring mu closer to 0 initially
-            self.mu = ARELUConv(self.conv.hidden_dim, num_z, kernel_size=1, padding=0, masked=True, zero_diag=False,
-                                weight_init_coeff=0.1, mirror=mirror)
+            self.mu = ARELUConv(self.conv.hidden_dim,
+                                num_z,
+                                kernel_size=1,
+                                padding=0,
+                                masked=True,
+                                zero_diag=False,
+                                weight_init_coeff=0.1,
+                                mirror=mirror)
 
     def forward(self, z, ftr):
         s = self.conv(z, ftr)
@@ -112,10 +117,12 @@ class AutoEncoder(nn.Module):
         self.res_dist = args.res_dist
         self.num_bits = args.num_x_bits
 
-        self.num_latent_scales = args.num_latent_scales         # number of spatial scales that latent layers will reside
-        self.num_groups_per_scale = args.num_groups_per_scale   # number of groups of latent vars. per scale
-        self.num_latent_per_group = args.num_latent_per_group   # number of latent vars. per group
-        self.groups_per_scale = groups_per_scale(self.num_latent_scales, self.num_groups_per_scale, args.ada_groups,
+        self.num_latent_scales = args.num_latent_scales  # number of spatial scales that latent layers will reside
+        self.num_groups_per_scale = args.num_groups_per_scale  # number of groups of latent vars. per scale
+        self.num_latent_per_group = args.num_latent_per_group  # number of latent vars. per group
+        self.groups_per_scale = groups_per_scale(self.num_latent_scales,
+                                                 self.num_groups_per_scale,
+                                                 args.ada_groups,
                                                  minimum_groups=args.min_groups_per_scale)
 
         self.vanilla_vae = self.num_latent_scales == 1 and self.num_groups_per_scale == 1
@@ -124,7 +131,7 @@ class AutoEncoder(nn.Module):
         self.num_channels_enc = args.num_channels_enc
         self.num_channels_dec = args.num_channels_dec
         self.num_preprocess_blocks = args.num_preprocess_blocks  # block is defined as series of Normal followed by Down
-        self.num_preprocess_cells = args.num_preprocess_cells   # number of cells per block
+        self.num_preprocess_cells = args.num_preprocess_cells  # number of cells per block
         self.num_cell_per_cond_enc = args.num_cell_per_cond_enc  # number of cell for each conditional in encoder
 
         # decoder parameters
@@ -140,12 +147,14 @@ class AutoEncoder(nn.Module):
         self.num_mix_output = args.num_mixture_dec
 
         # used for generative purpose
-        c_scaling = CHANNEL_MULT ** (self.num_preprocess_blocks + self.num_latent_scales - 1)
-        spatial_scaling = 2 ** (self.num_preprocess_blocks + self.num_latent_scales - 1)
+        c_scaling = CHANNEL_MULT**(self.num_preprocess_blocks + self.num_latent_scales - 1)
+        spatial_scaling = 2**(self.num_preprocess_blocks + self.num_latent_scales - 1)
         prior_ftr0_size = (int(c_scaling * self.num_channels_dec), self.input_size // spatial_scaling,
                            self.input_size // spatial_scaling)
         self.prior_ftr0 = nn.Parameter(torch.rand(size=prior_ftr0_size), requires_grad=True)
-        self.z0_size = [self.num_latent_per_group, self.input_size // spatial_scaling, self.input_size // spatial_scaling]
+        self.z0_size = [
+            self.num_latent_per_group, self.input_size // spatial_scaling, self.input_size // spatial_scaling
+        ]
 
         self.stem = self.init_stem()
         self.pre_process, mult = self.init_pre_process(mult=1)
@@ -247,10 +256,7 @@ class AutoEncoder(nn.Module):
 
     def init_encoder0(self, mult):
         num_c = int(self.num_channels_enc * mult)
-        cell = nn.Sequential(
-            nn.ELU(),
-            Conv2D(num_c, num_c, kernel_size=1, bias=True),
-            nn.ELU())
+        cell = nn.Sequential(nn.ELU(), Conv2D(num_c, num_c, kernel_size=1, bias=True), nn.ELU())
         return cell
 
     def init_normal_sampler(self, mult):
@@ -271,8 +277,7 @@ class AutoEncoder(nn.Module):
                 if not (s == 0 and g == 0):  # for the first group, we use a fixed standard Normal.
                     num_c = int(self.num_channels_dec * mult)
                     cell = nn.Sequential(
-                        nn.ELU(),
-                        Conv2D(num_c, 2 * self.num_latent_per_group, kernel_size=1, padding=0, bias=True))
+                        nn.ELU(), Conv2D(num_c, 2 * self.num_latent_per_group, kernel_size=1, padding=0, bias=True))
                     dec_sampler.append(cell)
 
             mult = mult / CHANNEL_MULT
@@ -333,8 +338,7 @@ class AutoEncoder(nn.Module):
                 C_out = 2 * 3
             else:
                 C_out = 10 * self.num_mix_output
-        return nn.Sequential(nn.ELU(),
-                             Conv2D(C_in, C_out, 3, padding=1, bias=True))
+        return nn.Sequential(nn.ELU(), Conv2D(C_in, C_out, 3, padding=1, bias=True))
 
     def forward(self, x):
         s = self.stem(2 * x - 1.0)
@@ -358,10 +362,10 @@ class AutoEncoder(nn.Module):
         combiner_cells_s.reverse()
 
         idx_dec = 0
-        ftr = self.enc0(s)                            # this reduces the channel dimension
+        ftr = self.enc0(s)  # this reduces the channel dimension
         param0 = self.enc_sampler[idx_dec](ftr)
         mu_q, log_sig_q = torch.chunk(param0, 2, dim=1)
-        dist = Normal(mu_q, log_sig_q)   # for the first approx. posterior
+        dist = Normal(mu_q, log_sig_q)  # for the first approx. posterior
         z, _ = dist.sample()
         log_q_conv = dist.log_p(z)
 
@@ -482,11 +486,96 @@ class AutoEncoder(nn.Module):
         logits = self.image_conditional(s)
         return logits
 
+    def encode(self, x):
+        s = self.stem(2 * x - 1.0)
+
+        # perform pre-processing
+        for cell in self.pre_process:
+            s = cell(s)
+
+        # run the main encoder tower
+        combiner_cells_enc = []
+        combiner_cells_s = []
+        for cell in self.enc_tower:
+            if cell.cell_type == 'combiner_enc':
+                combiner_cells_enc.append(cell)
+                combiner_cells_s.append(s)
+            else:
+                s = cell(s)
+
+        # reverse combiner cells and their input for decoder
+        combiner_cells_enc.reverse()
+        combiner_cells_s.reverse()
+
+        idx_dec = 0
+        ftr = self.enc0(s)  # this reduces the channel dimension
+        param0 = self.enc_sampler[idx_dec](ftr)
+        mu_q, log_sig_q = torch.chunk(param0, 2, dim=1)
+        dist = Normal(mu_q, log_sig_q)  # for the first approx. posterior
+        z, _ = dist.sample()
+        log_q_conv = dist.log_p(z)
+
+        # apply normalizing flows
+        nf_offset = 0
+        for n in range(self.num_flows):
+            z, log_det = self.nf_cells[n](z, ftr)
+            log_q_conv -= log_det
+        nf_offset += self.num_flows
+        all_q = [dist]
+        all_log_q = [log_q_conv]
+        return z, combiner_cells_s
+
+    def decode(self, z, combiner_cells_s, t):
+        nf_offset = self.num_flows
+        combiner_cells_enc = [cell for cell in self.enc_tower if cell.cell_type == 'combiner_enc']
+        combiner_cells_enc.reverse()
+
+        idx_dec = 0
+        s = self.prior_ftr0.unsqueeze(0)
+        batch_size = z.size(0)
+        s = s.expand(batch_size, -1, -1, -1)
+        for cell in self.dec_tower:
+            if cell.cell_type == 'combiner_dec':
+                if idx_dec > 0:
+                    # form prior
+                    param = self.dec_sampler[idx_dec - 1](s)
+                    mu_p, log_sig_p = torch.chunk(param, 2, dim=1)
+
+                    # form encoder
+                    ftr = combiner_cells_enc[idx_dec - 1](combiner_cells_s[idx_dec - 1], s)
+                    param = self.enc_sampler[idx_dec](ftr)
+                    mu_q, log_sig_q = torch.chunk(param, 2, dim=1)
+                    dist = Normal(mu_p + mu_q, log_sig_p + log_sig_q) if self.res_dist else Normal(mu_q, log_sig_q)
+                    z, _ = dist.sample()
+                    log_q_conv = dist.log_p(z)
+                    # apply NF
+                    for n in range(self.num_flows):
+                        z, log_det = self.nf_cells[nf_offset + n](z, ftr)
+                        log_q_conv -= log_det
+                    nf_offset += self.num_flows
+
+                # 'combiner_dec'
+                s = cell(s, z)
+                idx_dec += 1
+            else:
+                s = cell(s)
+
+        if self.vanilla_vae:
+            s = self.stem_decoder(z)
+
+        for cell in self.post_process:
+            s = cell(s)
+
+        logits = self.image_conditional(s)
+        return logits
+
     def decoder_output(self, logits):
         if self.dataset in {'mnist', 'omniglot'}:
             return Bernoulli(logits=logits)
-        elif self.dataset in {'stacked_mnist', 'cifar10', 'celeba_64', 'celeba_256', 'imagenet_32', 'imagenet_64', 'ffhq',
-                              'lsun_bedroom_128', 'lsun_bedroom_256', 'lsun_church_64', 'lsun_church_128'}:
+        elif self.dataset in {
+                'stacked_mnist', 'cifar10', 'celeba_64', 'celeba_256', 'imagenet_32', 'imagenet_64', 'ffhq',
+                'lsun_bedroom_128', 'lsun_bedroom_256', 'lsun_church_64', 'lsun_church_128'
+        }:
             if self.num_mix_output == 1:
                 return NormalDecoder(logits, num_bits=self.num_bits)
             else:
@@ -498,7 +587,7 @@ class AutoEncoder(nn.Module):
         """ This method computes spectral normalization for all conv layers in parallel. This method should be called
          after calling the forward method of all the conv layers in each iteration. """
 
-        weights = {}   # a dictionary indexed by the shape of weights
+        weights = {}  # a dictionary indexed by the shape of weights
         for l in self.all_conv_layers:
             weight = l.weight_normalized
             weight_mat = weight.view(weight.size(0), -1)
@@ -524,9 +613,11 @@ class AutoEncoder(nn.Module):
                     # are the first left and right singular vectors.
                     # This power iteration produces approximations of `u` and `v`.
                     self.sr_v[i] = F.normalize(torch.matmul(self.sr_u[i].unsqueeze(1), weights[i]).squeeze(1),
-                                               dim=1, eps=1e-3)  # bx1xr * bxrxc --> bx1xc --> bxc
+                                               dim=1,
+                                               eps=1e-3)  # bx1xr * bxrxc --> bx1xc --> bxc
                     self.sr_u[i] = F.normalize(torch.matmul(weights[i], self.sr_v[i].unsqueeze(2)).squeeze(2),
-                                               dim=1, eps=1e-3)  # bxrxc * bxcx1 --> bxrx1  --> bxr
+                                               dim=1,
+                                               eps=1e-3)  # bxrxc * bxcx1 --> bxrx1  --> bxr
 
             sigma = torch.matmul(self.sr_u[i].unsqueeze(1), torch.matmul(weights[i], self.sr_v[i].unsqueeze(2)))
             loss += torch.sum(sigma)
@@ -539,3 +630,29 @@ class AutoEncoder(nn.Module):
                 loss += torch.max(torch.abs(l.weight))
 
         return loss
+
+
+def load_nvae(checkpoint_path, batch_size=0):
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    args = checkpoint['args']
+
+    if not hasattr(args, 'ada_groups'):
+        args.ada_groups = False
+
+    if not hasattr(args, 'min_groups_per_scale'):
+        args.min_groups_per_scale = 1
+
+    if not hasattr(args, 'num_mixture_dec'):
+        args.num_mixture_dec = 10
+
+    if batch_size > 0:
+        args.batch_size = batch_size
+
+    arch_instance = get_arch_cells(args.arch_instance)
+    model = AutoEncoder(args, None, arch_instance)
+    # Loading is not strict because of self.weight_normalized in Conv2D class in neural_operations. This variable
+    # is only used for computing the spectral normalization and it is safe not to load it. Some of our earlier models
+    # did not have this variable.
+    model.load_state_dict(checkpoint['state_dict'], strict=False)
+    model = model.cuda()
+    return model

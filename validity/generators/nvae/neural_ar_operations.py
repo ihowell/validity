@@ -12,11 +12,10 @@ from torch.autograd import Variable
 import numpy as np
 from collections import OrderedDict
 
-from neural_operations import ConvBNSwish, normalize_weight_jit
+from .neural_operations import ConvBNSwish, normalize_weight_jit
 
-AROPS = OrderedDict([
-    ('conv_3x3', lambda C, masked, zero_diag: ELUConv(C, C, 3, 1, 1, masked=masked, zero_diag=zero_diag))
-])
+AROPS = OrderedDict([('conv_3x3',
+                      lambda C, masked, zero_diag: ELUConv(C, C, 3, 1, 1, masked=masked, zero_diag=zero_diag))])
 
 
 class Identity(nn.Module):
@@ -72,9 +71,18 @@ def norm(t, dim):
 
 class ARConv2d(nn.Conv2d):
     """Allows for weights as input."""
-
-    def __init__(self, C_in, C_out, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=False,
-                 masked=False, zero_diag=False, mirror=False):
+    def __init__(self,
+                 C_in,
+                 C_out,
+                 kernel_size,
+                 stride=1,
+                 padding=0,
+                 dilation=1,
+                 groups=1,
+                 bias=False,
+                 masked=False,
+                 zero_diag=False,
+                 mirror=False):
         """
         Args:
             use_shared (bool): Use weights for this layer or not?
@@ -113,18 +121,32 @@ class ARConv2d(nn.Conv2d):
         """
         self.weight_normalized = self.normalize_weight()
         bias = self.bias
-        return F.conv2d(x, self.weight_normalized, bias, self.stride,
-                        self.padding, self.dilation, self.groups)
+        return F.conv2d(x, self.weight_normalized, bias, self.stride, self.padding, self.dilation, self.groups)
 
 
 class ELUConv(nn.Module):
     """ReLU + Conv2d + BN."""
-
-    def __init__(self, C_in, C_out, kernel_size, padding=0, dilation=1, masked=True, zero_diag=True,
-                 weight_init_coeff=1.0, mirror=False):
+    def __init__(self,
+                 C_in,
+                 C_out,
+                 kernel_size,
+                 padding=0,
+                 dilation=1,
+                 masked=True,
+                 zero_diag=True,
+                 weight_init_coeff=1.0,
+                 mirror=False):
         super(ELUConv, self).__init__()
-        self.conv_0 = ARConv2d(C_in, C_out, kernel_size, stride=1, padding=padding, bias=True, dilation=dilation,
-                               masked=masked, zero_diag=zero_diag, mirror=mirror)
+        self.conv_0 = ARConv2d(C_in,
+                               C_out,
+                               kernel_size,
+                               stride=1,
+                               padding=padding,
+                               bias=True,
+                               dilation=dilation,
+                               masked=masked,
+                               zero_diag=zero_diag,
+                               mirror=mirror)
         # change the initialized log weight norm
         self.conv_0.log_weight_norm.data += np.log(weight_init_coeff)
 
@@ -144,11 +166,22 @@ class ARInvertedResidual(nn.Module):
         hidden_dim = int(round(inz * ex))
         padding = dil * (k - 1) // 2
         layers = []
-        layers.extend([ARConv2d(inz, hidden_dim, kernel_size=3, padding=1, masked=True, mirror=mirror, zero_diag=True),
-                       nn.ELU(inplace=True)])
-        layers.extend([ARConv2d(hidden_dim, hidden_dim, groups=hidden_dim, kernel_size=k, padding=padding, dilation=dil,
-                                masked=True, mirror=mirror, zero_diag=False),
-                      nn.ELU(inplace=True)])
+        layers.extend([
+            ARConv2d(inz, hidden_dim, kernel_size=3, padding=1, masked=True, mirror=mirror, zero_diag=True),
+            nn.ELU(inplace=True)
+        ])
+        layers.extend([
+            ARConv2d(hidden_dim,
+                     hidden_dim,
+                     groups=hidden_dim,
+                     kernel_size=k,
+                     padding=padding,
+                     dilation=dil,
+                     masked=True,
+                     mirror=mirror,
+                     zero_diag=False),
+            nn.ELU(inplace=True)
+        ])
         self.convz = nn.Sequential(*layers)
         self.hidden_dim = hidden_dim
 
@@ -162,15 +195,21 @@ class MixLogCDFParam(nn.Module):
         super(MixLogCDFParam, self).__init__()
 
         num_out = num_z * (3 * num_mix + 3)
-        self.conv = ELUConv(num_ftr, num_out, kernel_size=1, padding=0, masked=True, zero_diag=False,
-                            weight_init_coeff=0.1, mirror=mirror)
+        self.conv = ELUConv(num_ftr,
+                            num_out,
+                            kernel_size=1,
+                            padding=0,
+                            masked=True,
+                            zero_diag=False,
+                            weight_init_coeff=0.1,
+                            mirror=mirror)
         self.num_z = num_z
         self.num_mix = num_mix
 
     def forward(self, ftr):
         out = self.conv(ftr)
         b, c, h, w = out.size()
-        out = out.view(b, self.num_z, c // self.num_z,  h, w)
+        out = out.view(b, self.num_z, c // self.num_z, h, w)
         m = self.num_mix
         logit_pi, mu, log_s, log_a, b, _ = torch.split(out, [m, m, m, 1, 1, 1], dim=2)  # the last one is dummy
         return logit_pi, mu, log_s, log_a, b
@@ -188,7 +227,7 @@ def mix_log_cdf_flow(z1, logit_pi, mu, log_s, log_a, b):
 
     z = z1.unsqueeze(dim=2)
     log_pi = torch.log_softmax(logit_pi, dim=2)  # normalize log_pi
-    u = - (z - mu) * torch.exp(-log_s)
+    u = -(z - mu) * torch.exp(-log_s)
     softplus_u = F.softplus(u)
     log_mix_cdf = log_pi - softplus_u
     log_one_minus_mix_cdf = log_mix_cdf + u
