@@ -81,9 +81,9 @@ def xgems(encode,
             'path_viz': tf.concat([x_start, x], 2)
         }
 
-    optimizer = optim.Adam(zs, lr=1e-3)
+    optimizer = optim.Adam(zs[0:2], lr=1e-3)
 
-    for step in range(200):
+    for step in range(15000):
         optimizer.zero_grad()
         x = decode(zs)
         logits = classifier(x)
@@ -95,10 +95,11 @@ def xgems(encode,
         writer.add_scalar('class loss', class_loss, step)
         writer.add_scalar('decode loss', decode_loss, step)
         writer.add_scalar('classification', torch.argmax(logits, dim=1)[0], step)
-        sorted_logits = logits.sort(dim=1)
-        marginal = sorted_logits[-1] - sorted_logits[-2]
-        writer.add_scalar('marginal', torch.argmax(logits, dim=1)[0], step)
-        img = torch.cat([x_start, x], 3)[0]
+        sorted_logits = logits.sort(dim=1)[0]
+        marginal = sorted_logits[:, -1] - sorted_logits[:, -2]
+        writer.add_scalar('marginal', marginal[0], step)
+        x_diff = (x_start - x) * 2 + 0.5
+        img = torch.cat([x_start, x, x_diff], 3)[0]
         writer.add_image('xgem', torch.tensor(img), step)
         loss.backward()
         optimizer.step()

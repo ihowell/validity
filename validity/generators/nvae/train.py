@@ -15,13 +15,12 @@ import torch.distributed as dist
 from torch.multiprocessing import Process
 from torch.cuda.amp import autocast, GradScaler
 
-from model import AutoEncoder
-from thirdparty.adamax import Adamax
-import utils
-import datasets
-
-from fid.fid_score import compute_statistics_of_generator, load_statistics, calculate_frechet_distance
-from fid.inception import InceptionV3
+from validity.generators.nvae.model import AutoEncoder
+from validity.generators.nvae.thirdparty.adamax import Adamax
+from validity.generators.nvae.fid.fid_score import compute_statistics_of_generator, load_statistics, calculate_frechet_distance
+from validity.generators.nvae.fid.inception import InceptionV3
+import validity.generators.nvae.utils as utils
+import validity.generators.nvae.datasets as datasets
 
 
 def main(args):

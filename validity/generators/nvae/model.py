@@ -10,14 +10,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .neural_operations import OPS, EncCombinerCell, DecCombinerCell, Conv2D, get_skip_connection, SE
-from .neural_ar_operations import ARConv2d, ARInvertedResidual, MixLogCDFParam, mix_log_cdf_flow
-from .neural_ar_operations import ELUConv as ARELUConv
 from torch.distributions.bernoulli import Bernoulli
 
-from .utils import get_stride_for_cell_type, get_input_size, groups_per_scale, get_arch_cells
-from .distributions import Normal, DiscMixLogistic, NormalDecoder
-from .thirdparty.inplaced_sync_batchnorm import SyncBatchNormSwish
+from validity.generators.nvae.neural_operations import OPS, EncCombinerCell, DecCombinerCell, Conv2D, get_skip_connection, SE
+from validity.generators.nvae.neural_ar_operations import ARConv2d, ARInvertedResidual, MixLogCDFParam, mix_log_cdf_flow
+from validity.generators.nvae.neural_ar_operations import ELUConv as ARELUConv
+
+from validity.generators.nvae.utils import get_stride_for_cell_type, get_input_size, groups_per_scale, get_arch_cells
+from validity.generators.nvae.distributions import Normal, DiscMixLogistic, NormalDecoder
+from validity.generators.nvae.thirdparty.inplaced_sync_batchnorm import SyncBatchNormSwish
 
 CHANNEL_MULT = 2
 
@@ -450,42 +451,6 @@ class AutoEncoder(nn.Module):
 
         return logits, log_q, log_p, kl_all, kl_diag
 
-    def sample(self, num_samples, t):
-        scale_ind = 0
-        z0_size = [num_samples] + self.z0_size
-        dist = Normal(mu=torch.zeros(z0_size).cuda(), log_sigma=torch.zeros(z0_size).cuda(), temp=t)
-        z, _ = dist.sample()
-
-        idx_dec = 0
-        s = self.prior_ftr0.unsqueeze(0)
-        batch_size = z.size(0)
-        s = s.expand(batch_size, -1, -1, -1)
-        for cell in self.dec_tower:
-            if cell.cell_type == 'combiner_dec':
-                if idx_dec > 0:
-                    # form prior
-                    param = self.dec_sampler[idx_dec - 1](s)
-                    mu, log_sigma = torch.chunk(param, 2, dim=1)
-                    dist = Normal(mu, log_sigma, t)
-                    z, _ = dist.sample()
-
-                # 'combiner_dec'
-                s = cell(s, z)
-                idx_dec += 1
-            else:
-                s = cell(s)
-                if cell.cell_type == 'up_dec':
-                    scale_ind += 1
-
-        if self.vanilla_vae:
-            s = self.stem_decoder(z)
-
-        for cell in self.post_process:
-            s = cell(s)
-
-        logits = self.image_conditional(s)
-        return logits
-
     def encode(self, x):
         s = self.stem(2 * x - 1.0)
 
@@ -559,6 +524,49 @@ class AutoEncoder(nn.Module):
                 idx_dec += 1
             else:
                 s = cell(s)
+
+        if self.vanilla_vae:
+            s = self.stem_decoder(z)
+
+        for cell in self.post_process:
+            s = cell(s)
+
+        logits = self.image_conditional(s)
+        return logits
+
+    def prob(z):
+        # prior for z0
+        dist = Normal(mu=torch.zeros_like(z), log_sigma=torch.zeros_like(z))
+        log_p_conv = dist.log_p(z)
+        all_p = [dist]
+        all_log_p = [log_p_conv]
+
+    def sample(self, num_samples, t):
+        scale_ind = 0
+        z0_size = [num_samples] + self.z0_size
+        dist = Normal(mu=torch.zeros(z0_size).cuda(), log_sigma=torch.zeros(z0_size).cuda(), temp=t)
+        z, _ = dist.sample()
+
+        idx_dec = 0
+        s = self.prior_ftr0.unsqueeze(0)
+        batch_size = z.size(0)
+        s = s.expand(batch_size, -1, -1, -1)
+        for cell in self.dec_tower:
+            if cell.cell_type == 'combiner_dec':
+                if idx_dec > 0:
+                    # form prior
+                    param = self.dec_sampler[idx_dec - 1](s)
+                    mu, log_sigma = torch.chunk(param, 2, dim=1)
+                    dist = Normal(mu, log_sigma, t)
+                    z, _ = dist.sample()
+
+                # 'combiner_dec'
+                s = cell(s, z)
+                idx_dec += 1
+            else:
+                s = cell(s)
+                if cell.cell_type == 'up_dec':
+                    scale_ind += 1
 
         if self.vanilla_vae:
             s = self.stem_decoder(z)
