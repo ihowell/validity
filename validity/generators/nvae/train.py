@@ -343,7 +343,7 @@ def init_processes(rank, size, fn, args):
             dist.init_process_group(backend='nccl', init_method='env://', rank=rank, world_size=size)
             break
         except RuntimeError as e:
-            if 'Address already in use' not in e.message:
+            if 'Address already in use' not in e.msg:
                 raise
     fn(args)
     cleanup()
