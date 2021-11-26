@@ -43,7 +43,8 @@ def xgems(encode,
     class_coef = torch.tensor(class_coef).cuda()
     zs_init = encode(x_start)
     zs = [z.detach().clone().requires_grad_(True) for z in zs_init]
-    x_reencode_start = decode(zs)
+    x_reencode_start, initial_log_p = decode(zs)
+    initial_log_p = initial_log_p.clone().detach()
     criterion = nn.CrossEntropyLoss()
     y_start = torch.argmax(classifier(x_reencode_start), 1)[0]
 
@@ -81,26 +82,27 @@ def xgems(encode,
             'path_viz': tf.concat([x_start, x], 2)
         }
 
-    optimizer = optim.Adam(zs[0:2], lr=1e-3)
+    optimizer = optim.Adam(zs[0:1], lr=1e-3)
 
     for step in range(15000):
         optimizer.zero_grad()
-        x = decode(zs)
+        x, log_p = decode(zs)
         logits = classifier(x)
         decode_loss = torch.mean((x_start - x)**2, (1, 2, 3))
         class_loss = criterion(logits, y_target.cuda())
         # loss = decode_loss + class_coef * class_loss
-        loss = class_loss
-        writer.add_scalar('loss', loss, step)
-        writer.add_scalar('class loss', class_loss, step)
-        writer.add_scalar('decode loss', decode_loss, step)
-        writer.add_scalar('classification', torch.argmax(logits, dim=1)[0], step)
+        loss = class_loss + 1e-4 * torch.relu(initial_log_p - log_p)
+        writer.add_scalar('xgem/log_p', log_p, step)
+        writer.add_scalar('xgem/loss', loss, step)
+        writer.add_scalar('xgem/class loss', class_loss, step)
+        writer.add_scalar('xgem/decode loss', decode_loss, step)
+        writer.add_scalar('xgem/classification', torch.argmax(logits, dim=1)[0], step)
         sorted_logits = logits.sort(dim=1)[0]
         marginal = sorted_logits[:, -1] - sorted_logits[:, -2]
-        writer.add_scalar('marginal', marginal[0], step)
+        writer.add_scalar('xgem/marginal', marginal[0], step)
         x_diff = (x_start - x) * 2 + 0.5
         img = torch.cat([x_start, x, x_diff], 3)[0]
-        writer.add_image('xgem', torch.tensor(img), step)
+        writer.add_image('xgem/xgem', torch.tensor(img), step)
         loss.backward()
         optimizer.step()
 
@@ -139,8 +141,8 @@ def run_xgems(dataset, weights_path, generator_checkpoint, class_coef=1.0, data_
 
     def decode(zs):
         z, combiner_cells_s = zs[0], zs[1:]
-        logits = nvae.decode(z, combiner_cells_s, 1.)
-        return nvae.decoder_output(logits).sample()
+        logits, log_p = nvae.decode(z, combiner_cells_s, 1.)
+        return nvae.decoder_output(logits).sample(), log_p
 
     print('label', label)
     print('target label', target_label)

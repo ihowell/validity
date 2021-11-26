@@ -486,11 +486,19 @@ class AutoEncoder(nn.Module):
             z, log_det = self.nf_cells[n](z, ftr)
             log_q_conv -= log_det
         nf_offset += self.num_flows
-        all_q = [dist]
-        all_log_q = [log_q_conv]
+
         return z, combiner_cells_s
 
     def decode(self, z, combiner_cells_s, t):
+        """Returns decoded x and probability with respect to prior.
+        """
+
+        # prior for z0
+        dist = Normal(mu=torch.zeros_like(z), log_sigma=torch.zeros_like(z))
+        log_p_conv = dist.log_p(z)
+        all_p = [dist]
+        all_log_p = [log_p_conv]
+
         nf_offset = self.num_flows
         combiner_cells_enc = [cell for cell in self.enc_tower if cell.cell_type == 'combiner_enc']
         combiner_cells_enc.reverse()
@@ -509,6 +517,7 @@ class AutoEncoder(nn.Module):
                     # form encoder
                     ftr = combiner_cells_enc[idx_dec - 1](combiner_cells_s[idx_dec - 1], s)
                     param = self.enc_sampler[idx_dec](ftr)
+
                     mu_q, log_sig_q = torch.chunk(param, 2, dim=1)
                     dist = Normal(mu_p + mu_q, log_sig_p + log_sig_q) if self.res_dist else Normal(mu_q, log_sig_q)
                     z, _ = dist.sample()
@@ -518,6 +527,12 @@ class AutoEncoder(nn.Module):
                         z, log_det = self.nf_cells[nf_offset + n](z, ftr)
                         log_q_conv -= log_det
                     nf_offset += self.num_flows
+
+                    # evaluate log_p(z)
+                    dist = Normal(mu_p, log_sig_p)
+                    log_p_conv = dist.log_p(z)
+                    all_p.append(dist)
+                    all_log_p.append(log_p_conv)
 
                 # 'combiner_dec'
                 s = cell(s, z)
@@ -532,14 +547,12 @@ class AutoEncoder(nn.Module):
             s = cell(s)
 
         logits = self.image_conditional(s)
-        return logits
 
-    def prob(z):
-        # prior for z0
-        dist = Normal(mu=torch.zeros_like(z), log_sigma=torch.zeros_like(z))
-        log_p_conv = dist.log_p(z)
-        all_p = [dist]
-        all_log_p = [log_p_conv]
+        log_p = 0.
+        for log_p_conv in all_log_p:
+            log_p += torch.sum(log_p_conv, dim=[1, 2, 3])
+
+        return logits, log_p
 
     def sample(self, num_samples, t):
         scale_ind = 0

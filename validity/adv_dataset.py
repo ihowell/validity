@@ -13,19 +13,30 @@ from torchvision import transforms, datasets
 from tqdm import tqdm
 
 from validity.classifiers.resnet import ResNet34
+from validity.classifiers.mnist import MnistClassifier
+from validity.datasets import load_datasets
 
 
 def construct_example(dataset, attack, net_type, weights_location, data_root='./datasets'):
-    network = ResNet34(10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
+    network = ResNet34(
+        10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
     network.load_state_dict(torch.load(weights_location, map_location=f'cuda:0'))
     network = network.cuda()
 
     confidence = 7.439
-    test_dataset = datasets.CIFAR10(root=data_root, train=False, download=True, transform=transforms.ToTensor())
+    test_dataset = datasets.CIFAR10(root=data_root,
+                                    train=False,
+                                    download=True,
+                                    transform=transforms.ToTensor())
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=64, shuffle=False)
     for data, label in test_loader:
         data = data.cuda()
-        adv_data = carlini_wagner_l2(network, data, 10, confidence=confidence, clip_min=0., clip_max=1.)
+        adv_data = carlini_wagner_l2(network,
+                                     data,
+                                     10,
+                                     confidence=confidence,
+                                     clip_min=0.,
+                                     clip_max=1.)
 
         logits = network(data)
         adv_logits = network(adv_data)
@@ -60,33 +71,56 @@ def construct_dataset(dataset, attack, net_type, weights_location, data_root='./
     elif attack == 'bim':
         adv_noise = 0.02
     elif attack == 'cwl2':
-        if dataset == 'cifar10':
+        if dataset == 'mnist':
+            confidence = 0.
+        elif dataset == 'cifar10':
             confidence = 7.439  # Average logit marginal in training set
 
     if net_type == 'resnet':
-        network = ResNet34(10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
+        network = ResNet34(
+            10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
+        network.load_state_dict(torch.load(weights_location, map_location=f'cuda:0'))
+    elif dataset == 'mnist':
+        network = MnistClassifier()
         network.load_state_dict(torch.load(weights_location, map_location=f'cuda:0'))
 
-        if dataset == 'cifar10':
-            ds_mean = (0.4914, 0.4822, 0.4465)
-            ds_std = (0.2023, 0.1994, 0.2010)
+    if dataset == 'mnist':
+        ds_mean = (0.1307, )
+        ds_std = (0.3081, )
 
-            ds_mean = torch.tensor(ds_mean).reshape((3, 1, 1))
-            ds_std = torch.tensor(ds_std).reshape((3, 1, 1))
-            if attack == 'fgsm':
-                random_noise_size = 0.25 / 4 * 0.2
-            elif attack == 'bim':
-                random_noise_size = 0.21 / 4 * 0.2
-            elif attack == 'cwl2':
-                random_noise_size = 0.05 / 2 * 0.2
+        ds_mean = torch.tensor(ds_mean).reshape((1, 1, 1))
+        ds_std = torch.tensor(ds_std).reshape((1, 1, 1))
+        if attack == 'fgsm':
+            random_noise_size = 0.25 / 4 * 0.2
+        elif attack == 'bim':
+            random_noise_size = 0.21 / 4 * 0.2
+        elif attack == 'cwl2':
+            random_noise_size = 0.05 / 2 * 0.2
 
-    if dataset == 'cifar10':
-        test_dataset = datasets.CIFAR10(root=data_root, train=False, download=True, transform=transforms.ToTensor())
-        n_classes = 10
+    elif dataset == 'cifar10':
+        ds_mean = (0.4914, 0.4822, 0.4465)
+        ds_std = (0.2023, 0.1994, 0.2010)
 
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=64, shuffle=False)
-    network.cuda()
+        ds_mean = torch.tensor(ds_mean).reshape((3, 1, 1))
+        ds_std = torch.tensor(ds_std).reshape((3, 1, 1))
+        if attack == 'fgsm':
+            random_noise_size = 0.25 / 4 * 0.2
+        elif attack == 'bim':
+            random_noise_size = 0.21 / 4 * 0.2
+        elif attack == 'cwl2':
+            random_noise_size = 0.05 / 2 * 0.2
+
+    if attack == 'cwl2':
+        if dataset == 'mnist':
+            n_classes = 10
+        elif dataset == 'cifar10':
+            n_classes = 10
+
+    network = network.cuda()
     network.eval()
+
+    _, test_dataset = load_datasets(dataset)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=64, shuffle=False)
 
     clean_data = []
     adv_data = []
@@ -107,7 +141,12 @@ def construct_dataset(dataset, attack, net_type, weights_location, data_root='./
         noisy_d = torch.clamp(noisy_d, 0., 1.)
 
         if attack == 'fgsm':
-            adv_batch = fast_gradient_method(network, data, adv_noise, np.inf, clip_min=0., clip_max=1.)
+            adv_batch = fast_gradient_method(network,
+                                             data,
+                                             adv_noise,
+                                             np.inf,
+                                             clip_min=0.,
+                                             clip_max=1.)
         elif attack == 'bim':
             adv_batch = projected_gradient_descent(network,
                                                    data,
@@ -130,9 +169,12 @@ def construct_dataset(dataset, attack, net_type, weights_location, data_root='./
         adv_logits = network(adv_batch)
         adv_preds = torch.argmax(adv_logits, 1)
 
-        accuracy.append(torch.mean(torch.where(preds == labels, 1., 0.)).cpu().detach().numpy())
-        noise_accuracy.append(torch.mean(torch.where(noise_preds == labels, 1., 0.)).cpu().detach().numpy())
-        adv_accuracy.append(torch.mean(torch.where(adv_preds == labels, 1., 0.)).cpu().detach().numpy())
+        accuracy.append(
+            torch.mean(torch.where(preds == labels, 1., 0.)).cpu().detach().numpy())
+        noise_accuracy.append(
+            torch.mean(torch.where(noise_preds == labels, 1., 0.)).cpu().detach().numpy())
+        adv_accuracy.append(
+            torch.mean(torch.where(adv_preds == labels, 1., 0.)).cpu().detach().numpy())
 
         indices = torch.where(torch.logical_and(noise_preds == labels, adv_preds != labels))[0]
         data = torch.index_select(data, 0, indices)
@@ -175,6 +217,14 @@ def load_adv_dataset(dataset, attack, net_type):
     noisy_data = np.load(noisy_ds_path)
 
     return clean_data, adv_data, noisy_data
+
+
+def calculate_channel_means(dataset):
+    channels = []
+    train_ds, _ = load_datasets(dataset)
+    data = np.stack([data for data, _ in train_ds])
+    print(f'Mean: {np.mean(data, (0, 2, 3))}')
+    print(f'Std: {np.std(data, (0, 2, 3))}')
 
 
 if __name__ == '__main__':
