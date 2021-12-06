@@ -54,40 +54,6 @@ def xgems(encode,
     criterion = nn.CrossEntropyLoss()
     y_start = torch.argmax(classifier(x_reencode_start), 1)[0]
 
-    # prefix = f'{y_start}_to_{y_target}'
-
-    def loss_fn(z):
-        x = decode(z)
-
-        y = classifier(x)
-        class_loss = criterion(logits=logits, labels=tf.expand_dims(y_target, 0))
-
-        decode_loss = tf.reduce_mean((x_start - x)**2, (1, 2, 3))
-
-        # if strategy == 'crs_only':
-        #     loss = class_loss
-        # elif strategy == 'latent_distance':
-        #     decode_loss = tf.reduce_mean((z_init - z)**2, range(1, len(z.shape)))
-        #     loss = decode_loss + class_coef * class_loss
-        # else:
-        loss = decode_loss + class_coef * class_loss
-
-        sm = tf.nn.softmax(logits[0])
-        diff = sm[y_start] - sm[y_target]
-
-        sorted_logits = logits.sort(dim=1)
-        marginal = sorted_logits[-1] - sorted_logits[-2]
-
-        return {
-            'class_prediction': diff,
-            'class_loss': class_loss,
-            'decode_loss': decode_loss,
-            'loss': loss,
-            'logits': logits,
-            'marginal': marginal,
-            'path_viz': tf.concat([x_start, x], 2)
-        }
-
     optim_lr = 1e-2
     if type(zs) is list:
         optimizer = optim.Adam(zs[0:1], lr=optim_lr)
@@ -100,8 +66,8 @@ def xgems(encode,
         logits = classifier(x)
         decode_loss = torch.mean((x_start - x)**2, (1, 2, 3))
         class_loss = criterion(logits, y_target.cuda())
-        loss = class_loss
-        # loss = decode_loss + class_coef * class_loss
+        # loss = class_loss
+        loss = decode_loss + class_coef * class_loss
         # loss = class_loss + 1e-4 * torch.relu(initial_log_p - log_p)
         writer.add_scalar('xgem/log_p', log_p, step)
         writer.add_scalar('xgem/loss', loss, step)
@@ -111,7 +77,7 @@ def xgems(encode,
         sorted_logits = logits.sort(dim=1)[0]
         marginal = sorted_logits[:, -1] - sorted_logits[:, -2]
         writer.add_scalar('xgem/marginal', marginal[0], step)
-        x_diff = (x_start - x) * 2 + 0.5
+        x_diff = (x_start - x) / 2 + 0.5
         img = torch.cat([x_start, x, x_diff], 3)[0]
         writer.add_image('xgem/xgem', torch.tensor(img), step)
         loss.backward()
@@ -129,10 +95,13 @@ def run_xgems(dataset,
               generator_weights_path,
               class_coef=1.0,
               data_root='./datasets/',
-              cuda_idx=0):
-    torch.cuda.manual_seed(0)
+              cuda_idx=0,
+              seed=1):
+    torch.backends.cudnn.deterministic = True
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
     _, test_ds = load_datasets(dataset)
-    in_test_loader = torch.utils.data.DataLoader(test_ds, batch_size=1, shuffle=False)
+    in_test_loader = torch.utils.data.DataLoader(test_ds, batch_size=1, shuffle=True)
 
     if classifier_net_type == 'mnist':
         classifier = MnistClassifier()
@@ -151,20 +120,10 @@ def run_xgems(dataset,
         generator.load_state_dict(torch.load(generator_weights_path))
 
         def encode(x):
-            mu_z, log_sig_z = generator.encode(x)
-            mu_z = mu_z.unsqueeze(-1)
-            sig_z = F.softplus(log_sig_z).unsqueeze(-1).unsqueeze(-1) + 1e-3
-            pz = dist.multivariate_normal.MultivariateNormal(mu_z, sig_z)
-            pz = dist.independent.Independent(pz, 1)
-            z = pz.rsample().squeeze(-1)
-            return z
+            return generator.encode(x)
 
         def decode(z):
-            mu_x_hat = generator.decode(z)
-            px_hat = dist.bernoulli.Bernoulli(logits=mu_x_hat)
-            px_hat = dist.independent.Independent(px_hat, 3)
-            # x_hat = mu_x_hat
-            x_hat = px_hat.sample()
+            x_hat = generator.decode(z)
             log_p = generator.log_prob(x_hat)
             return x_hat, log_p
 

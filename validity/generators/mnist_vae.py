@@ -102,13 +102,20 @@ class MnistVAE(nn.Module):
             EncResCell(64),
             nn.ELU(),
             EncResCell(64),
+            nn.ELU(),
+            nn.Conv2d(64, 128, 5, padding='same'),
+            nn.ELU(),
+            EncResCell(128),
+            nn.ELU(),
+            EncResCell(128),
+            nn.ELU(),
         ])
-        self.linear_mu = nn.Linear(1600, 300)
+        self.linear_mu = nn.Linear(3200, 400)
 
-        self.latent_shape = (300, )
+        self.latent_shape = (400, )
 
         self.dec_layers = nn.ModuleList([
-            nn.Linear(300, 1600),
+            nn.Linear(400, 1600),
             nn.Unflatten(-1, (64, 5, 5)),
             nn.ConvTranspose2d(64, 64, 5, stride=2),
             nn.ELU(),
@@ -118,7 +125,11 @@ class MnistVAE(nn.Module):
             nn.ELU(),
             DecResCell(128),
             nn.ELU(),
+            DecResCell(128),
+            nn.ELU(),
             nn.Conv2d(128, 64, 3, padding='same'),
+            nn.ELU(),
+            DecResCell(64),
             nn.ELU(),
             DecResCell(64),
             nn.ELU(),
@@ -148,17 +159,33 @@ class MnistVAE(nn.Module):
             nn.ELU(),
             DecResCell(4),
             nn.ELU(),
-            nn.Conv2d(4, 1, 3, padding='same'),
+            nn.Conv2d(4, 4, 5, padding='same'),
+            nn.Conv2d(4, 4, 3, padding='same'),
+            nn.Conv2d(4, 4, 1, padding='same'),
+            nn.Conv2d(4, 1, 5, padding='same'),
+            nn.Conv2d(1, 1, 3, padding='same'),
+            nn.Conv2d(1, 1, 1, padding='same'),
         ])
 
     def encode(self, x):
-        # x = input_transform(x)
-        return self._encode(x)
+        # Encode to a random code
+        x = input_transform(x)
+        mu_z = self._encode(x)
+        # sig_z = torch.exp(self.tied_log_sig_z) + SIG_EPSILON
+        # pz = dist.normal.Normal(mu_z, sig_z)
+        # pz = dist.independent.Independent(pz, 1)
+        # z = pz.rsample()
+        return mu_z
 
     def decode(self, z):
-        x_hat = self._decode(z)
+        # Decode code to a random sample
+        mu_x_hat = self._decode(z)
+        # sig_x_hat = torch.exp(-F.softplus(self.tied_log_sig_x_hat)) + SIG_EPSILON
+        # px_hat = dist.normal.Normal(mu_x_hat, sig_x_hat)
+        # px_hat = dist.independent.Independent(px_hat, 3)
         # x_hat_logits = px_hat.sample().clamp(EPSILON.logit(), (-EPSILON + 1.).logit())
-        # return reverse_transform(x_hat_logits)
+        # x_hat = reverse_transform(x_hat_logits).clamp(0., 1.)
+        x_hat = reverse_transform(mu_x_hat).clamp(0., 1.)
         return x_hat
 
     def _encode(self, x):
@@ -169,7 +196,6 @@ class MnistVAE(nn.Module):
 
         out = torch.flatten(out, 1)
         mu_z = self.linear_mu(out)
-        # log_sig_z = self.linear_log_sig(out)
         return mu_z
 
     def _decode(self, z):
@@ -250,8 +276,8 @@ class MnistVAE(nn.Module):
 
     def log_prob(self, x):
         n = x.size(1)
-        nelbo, kl, posterior_nll, x_hat = self.forward(x)
-        return -1. * nelbo
+        loss, metrics = self.forward(x)
+        return -1. * metrics['nelbo']
 
     def latent_log_prob(self, z):
         n = z.size(0)
@@ -271,6 +297,7 @@ def train(beta=1.,
           data_root='./datasets/',
           cuda_idx=0,
           mutation_rate=None):
+    beta = float(beta)
     vae = MnistVAE(beta=beta)
     vae = vae.cuda()
 
@@ -309,8 +336,8 @@ def train(beta=1.,
             loss, metrics = vae(data)
             writer.add_scalar('train/loss', loss.mean(), step)
             for metric_name, metric in metrics.items():
-                if 'img' in metric_name:
-                    metric_name = ''.join(metric_name.split('img'))
+                if '_img' in metric_name:
+                    metric_name = ''.join(metric_name.split('_img'))
                     writer.add_images(f'train/{metric_name}', metric, step)
                 else:
                     writer.add_scalar(f'train/{metric_name}', metric.mean(), step)
@@ -341,9 +368,9 @@ def train(beta=1.,
                 else:
                     writer.add_scalar(f'val/{metric_name}', metric.mean(), step)
 
-                step += 1
+            step += 1
 
-                val_loss.append(loss.mean())
+            val_loss.append(loss.mean())
 
         val_loss = torch.tensor(val_loss).mean()
 
