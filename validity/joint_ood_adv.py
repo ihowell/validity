@@ -9,56 +9,54 @@ from torchvision import datasets, transforms
 from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
 
 from validity.adv_dataset import load_adv_dataset
+from validity.datasets import load_datasets
 from validity.detectors.lid import load_best_lid, load_lid, LIDDetector
 from validity.detectors.mahalanobis import MahalanobisDetector, load_best_mahalanobis_adv, load_best_mahalanobis_ood, load_mahalanobis_ood, load_mahalanobis_adv
 from validity.detectors.odin import ODINDetector, load_best_odin, load_odin
 from validity.util import np_loader
 
 
-def main(net_type, in_ds_name, out_ds_name, adv_attack, data_root='./datasets/', adv_step=True):
+def main(net_type,
+         in_ds_name,
+         out_ds_name,
+         adv_attack,
+         data_root='./datasets/',
+         adv_step=True):
     torch.cuda.manual_seed(0)
 
     # Load datasets
-    in_test_loader = torch.utils.data.DataLoader(datasets.CIFAR10(root=data_root,
-                                                                  train=False,
-                                                                  download=True,
-                                                                  transform=transforms.ToTensor()),
-                                                 batch_size=64,
-                                                 shuffle=True)
-    out_test_loader = torch.utils.data.DataLoader(datasets.SVHN(root=data_root,
-                                                                split='test',
-                                                                download=True,
-                                                                transform=transforms.ToTensor()),
-                                                  batch_size=64,
-                                                  shuffle=True)
+    _, in_test_ds = load_datasets(in_ds_name)
+    in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=1, shuffle=False)
 
-    orig_data, adv_data, noise_data = load_adv_dataset(in_ds_name, adv_attack, 'resnet')
+    _, out_test_ds = load_datasets(out_ds_name)
+    out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=1, shuffle=False)
+
+    orig_data, adv_data, noise_data = load_adv_dataset(in_ds_name, adv_attack, net_type)
     orig_data = orig_data[500:]
     adv_data = adv_data[500:]
     noise_data = noise_data[500:]
     clean_data = np.concatenate([orig_data, noise_data])
 
     # Load detectors
+    llr_ood = get_llr_detector(in_ds_name, out_ds_name, batch_size)
+
+    lid_adv = load_best_lid(net_type, in_ds_name, adv_attack)
     if adv_step:
         odin_ood = load_best_odin(net_type, in_ds_name, out_ds_name)
         mahalanobis_ood = load_best_mahalanobis_ood(net_type, in_ds_name, out_ds_name)
-        # llr_ood = get_llr_detector(in_ds_name, out_ds_name, batch_size)
 
-        lid_adv = load_best_lid(net_type, in_ds_name, adv_attack)
         mahalanobis_adv = load_best_mahalanobis_adv(net_type, in_ds_name, adv_attack)
     else:
         odin_ood = load_odin(net_type, in_ds_name, out_ds_name, 0, 1000.)
         mahalanobis_ood = load_mahalanobis_ood(net_type, in_ds_name, out_ds_name, 0)
-        # llr_ood = get_llr_detector(in_ds_name, out_ds_name, batch_size)
 
-        lid_adv = load_best_lid(net_type, in_ds_name, adv_attack)
         mahalanobis_adv = load_mahalanobis_adv(net_type, in_ds_name, adv_attack, 0)
 
     detectors = [
         # OOD
         (f'ODIN OOD {out_ds_name}', odin_ood),
         (f'Mahalanobis OOD {out_ds_name}', mahalanobis_ood),
-        # (f'LLR OOD {out_ds_name}', llr_ood),
+        (f'LLR OOD {out_ds_name}', llr_ood),
 
         # ADV
         (f'LID Adv {adv_attack}', lid_adv),
@@ -107,10 +105,12 @@ def main(net_type, in_ds_name, out_ds_name, adv_attack, data_root='./datasets/',
         clean_probs = []
         adv_preds = []
         adv_probs = []
-        for batch, _ in tqdm(np_loader(clean_data, False), desc=f'{detector_name}, clean data'):
+        for batch, _ in tqdm(np_loader(clean_data, False),
+                             desc=f'{detector_name}, clean data'):
             clean_preds.append(detector.predict(batch.cuda()))
             clean_probs.append(detector.predict_proba(batch.cuda())[:, 1])
-        for batch, _ in tqdm(np_loader(adv_data, True), desc=f'{detector_name}, adversarial data'):
+        for batch, _ in tqdm(np_loader(adv_data, True),
+                             desc=f'{detector_name}, adversarial data'):
             adv_preds.append(detector.predict(batch.cuda()))
             adv_probs.append(detector.predict_proba(batch.cuda())[:, 1])
         clean_preds = np.concatenate(clean_preds)
@@ -133,7 +133,8 @@ def main(net_type, in_ds_name, out_ds_name, adv_attack, data_root='./datasets/',
 
     # Print results
     print('Adv Step optimization:', adv_step)
-    results = [['', '', 'OOD', '', '', 'ADV', ''], ['Method', 'AUC', 'TPR', 'TNR', 'AUC', 'TPR', 'TNR']]
+    results = [['', '', 'OOD', '', '', 'ADV', ''],
+               ['Method', 'AUC', 'TPR', 'TNR', 'AUC', 'TPR', 'TNR']]
     for detector_name, detector in detectors:
         row = [
             ood_res[detector_name]['auc_score'],

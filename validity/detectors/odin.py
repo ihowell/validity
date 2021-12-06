@@ -52,8 +52,12 @@ class ODINDetector:
 
         val_scores = np.concatenate([val_score_in, val_score_out])
         test_scores = np.concatenate([test_score_in, test_score_out])
-        val_labels = np.concatenate([np.ones(val_score_in.shape[0]), np.zeros(val_score_out.shape[0])])
-        test_labels = np.concatenate([np.ones(test_score_in.shape[0]), np.zeros(test_score_out.shape[0])])
+        val_labels = np.concatenate(
+            [np.ones(val_score_in.shape[0]),
+             np.zeros(val_score_out.shape[0])])
+        test_labels = np.concatenate(
+            [np.ones(test_score_in.shape[0]),
+             np.zeros(test_score_out.shape[0])])
 
         res = {}
 
@@ -100,34 +104,47 @@ class ODINDetector:
         return soft_out.data.cpu()
 
 
-def train_odin(net_type, weights_path, data_root='./datasets/', cuda_idx=0, magnitude=1e-2, temperature=1000.):
+def train_odin(in_dataset,
+               out_dataset,
+               net_type,
+               weights_path,
+               data_root='./datasets/',
+               cuda_idx=0,
+               magnitude=1e-2,
+               temperature=1000.):
     from validity.classifiers.resnet import ResNet34
+    from validity.classifiers.mnist import MnistClassifier
+    from validity.datasets import load_datasets
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    network = ResNet34(10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
-    weights = torch.load(weights_path, map_location=f'cuda:{cuda_idx}')
-    network.load_state_dict(weights)
-    network.cuda()
+    if net_type == 'mnist':
+        network = MnistClassifier()
+        network.load_state_dict(torch.load(weights_path, map_location=f'cuda:0'))
+    elif net_type == 'resnet':
+        network = ResNet34(
+            10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
+        network.load_state_dict(torch.load(weights_path, map_location=f'cuda:0'))
+    network = network.cuda()
 
     odin = ODINDetector(network, magnitude, temperature)
 
-    # Note: The transform is the per channel mean and std dev of
-    # cifar10 training set.
+    _, in_test_ds = load_datasets(in_dataset)
+    in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)
+    _, out_test_ds = load_datasets(out_dataset)
+    out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=64, shuffle=True)
 
-    in_test_loader = torch.utils.data.DataLoader(datasets.CIFAR10(root=data_root,
-                                                                  train=False,
-                                                                  download=True,
-                                                                  transform=transforms.ToTensor()),
-                                                 batch_size=64,
-                                                 shuffle=True)
-
-    out_dataset = datasets.SVHN(root=data_root, split='test', download=True, transform=transforms.ToTensor())
-    out_test_loader = torch.utils.data.DataLoader(out_dataset, batch_size=64, shuffle=True)
     results = odin.evaluate(in_test_loader, out_test_loader)
-    save_path = pathlib.Path('odin', f'odin_{net_type}_cifar10_svhn_{magnitude}_{temperature}.pt')
+
+    save_path = pathlib.Path(
+        'ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}.pt')
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(odin, save_path)
+
+    res_save_path = pathlib.Path(
+        'ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}_res.pt')
+    torch.save(results, res_save_path)
+
     print(f'Magnitude {magnitude} temperature {temperature}:')
     for result_name, result in results.items():
         if type(result) in [dict, tuple, list]:
@@ -141,15 +158,24 @@ def train_odin(net_type, weights_path, data_root='./datasets/', cuda_idx=0, magn
     return odin, results
 
 
-def train_multiple_odin(net_type, weights_path, data_root='./datasets/', cuda_idx=0, latex_print=False):
-    magnitudes = [0, 0.0005, 0.001, 0.0014, 0.002, 0.0024, 0.005, 0.007, 0.01, 0.014, 0.02, 0.05]
+def train_multiple_odin(in_dataset,
+                        out_dataset,
+                        net_type,
+                        weights_path,
+                        data_root='./datasets/',
+                        cuda_idx=0,
+                        latex_print=False):
+    magnitudes = [
+        0, 0.0005, 0.001, 0.0014, 0.002, 0.0024, 0.005, 0.007, 0.01, 0.014, 0.02, 0.05
+    ]
     result_table = [['Magnitude', 'AUC Score', 'FPR at TPR=0.95']]
 
     best_detector = None
     best_auc = None
 
     for magnitude in magnitudes:
-        detector, res = train_odin(net_type, weights_path, data_root, cuda_idx, magnitude)
+        detector, res = train_odin(in_dataset, out_dataset, net_type, weights_path, data_root,
+                                   cuda_idx, magnitude)
         fpr, tpr = res['plot']
         plt.plot(fpr, tpr, label=str(magnitude))
         row = [magnitude, res['auc_score'], res['fpr_at_tpr_95']]
@@ -167,7 +193,7 @@ def train_multiple_odin(net_type, weights_path, data_root='./datasets/', cuda_id
     plt.legend()
     plt.savefig('odin/ood_results.png')
 
-    save_path = pathlib.Path('odin', f'odin_{net_type}_cifar10_svhn_best.pt')
+    save_path = pathlib.Path('ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_best.pt')
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(best_detector, save_path)
 
@@ -183,13 +209,14 @@ def train_multiple_odin(net_type, weights_path, data_root='./datasets/', cuda_id
 
 
 def load_odin(net_type, in_dataset, out_dataset, magnitude, temperature):
-    save_path = pathlib.Path('odin', f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}.pt')
+    save_path = pathlib.Path(
+        'ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}.pt')
     assert save_path.exists(), f'{save_path} does not exist'
     return torch.load(save_path)
 
 
 def load_best_odin(net_type, in_dataset, out_dataset):
-    save_path = pathlib.Path('odin', f'odin_{net_type}_cifar10_svhn_best.pt')
+    save_path = pathlib.Path('ood', f'odin_{net_type}_cifar10_svhn_best.pt')
     assert save_path.exists(), f'{save_path} does not exist'
     return torch.load(save_path)
 

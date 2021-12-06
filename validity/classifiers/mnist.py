@@ -33,6 +33,53 @@ class MnistClassifier(nn.Module):
         out = self.dense(out)
         return out
 
+    def penultimate_forward(self, x):
+        out = x
+        out = self.transform(out)
+        out = self.conv1(out)
+        out = F.max_pool2d(out, 2)
+        out = torch.relu(out)
+        out = self.conv2(out)
+        out = F.max_pool2d(out, 2)
+        out = torch.relu(out)
+        penultimate = out
+        out = torch.flatten(out, 1)
+        out = self.dense(out)
+        return out, penultimate
+
+    def feature_list(self, x):
+        features = []
+        out = x
+        out = self.transform(out)
+        out = self.conv1(out)
+        features.append(out)
+        out = F.max_pool2d(out, 2)
+        out = torch.relu(out)
+        out = self.conv2(out)
+        features.append(out)
+        out = F.max_pool2d(out, 2)
+        out = torch.relu(out)
+        out = torch.flatten(out, 1)
+        out = self.dense(out)
+        return out, features
+
+    def intermediate_forward(self, x, layer_idx):
+        out = x
+        out = self.transform(out)
+        out = self.conv1(out)
+        if layer_idx == 0:
+            return out
+        out = F.max_pool2d(out, 2)
+        out = torch.relu(out)
+        out = self.conv2(out)
+        if layer_idx == 1:
+            return out
+        out = F.max_pool2d(out, 2)
+        out = torch.relu(out)
+        out = torch.flatten(out, 1)
+        out = self.dense(out)
+        return out
+
 
 def test():
     net = ResNet18()
@@ -43,10 +90,8 @@ def test():
 def train_network(num_epochs=10, data_root='./datasets/', cuda_idx=0):
     net = MnistClassifier()
     net = net.cuda()
-    in_train_loader = torch.utils.data.DataLoader(datasets.MNIST(root=data_root,
-                                                                 train=True,
-                                                                 download=True,
-                                                                 transform=transforms.ToTensor()),
+    in_train_loader = torch.utils.data.DataLoader(datasets.MNIST(
+        root=data_root, train=True, download=True, transform=transforms.ToTensor()),
                                                   batch_size=64,
                                                   shuffle=True)
     criterion = nn.CrossEntropyLoss()
@@ -60,10 +105,8 @@ def train_network(num_epochs=10, data_root='./datasets/', cuda_idx=0):
             loss.backward()
             optimizer.step()
 
-    in_test_loader = torch.utils.data.DataLoader(datasets.MNIST(root=data_root,
-                                                                train=False,
-                                                                download=True,
-                                                                transform=transforms.ToTensor()),
+    in_test_loader = torch.utils.data.DataLoader(datasets.MNIST(
+        root=data_root, train=False, download=True, transform=transforms.ToTensor()),
                                                  batch_size=64,
                                                  shuffle=False)
 

@@ -12,12 +12,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import torch.distributions as dist
 import numpy as np
 from torchvision import datasets, transforms
 from tensorboardX import SummaryWriter
 
+from validity.classifiers import MnistClassifier, ResNet34
+from validity.datasets import load_datasets
+from validity.generators.mnist_vae import MnistVAE
 from validity.generators.nvae.model import load_nvae
-from validity.classifiers import ResNet34
 
 
 def xgems(encode,
@@ -42,7 +45,10 @@ def xgems(encode,
     x_start = x_start.cuda()
     class_coef = torch.tensor(class_coef).cuda()
     zs_init = encode(x_start)
-    zs = [z.detach().clone().requires_grad_(True) for z in zs_init]
+    if type(zs_init) is list:
+        zs = [z.detach().clone().requires_grad_(True) for z in zs_init]
+    else:
+        zs = zs_init.detach().clone().requires_grad_(True)
     x_reencode_start, initial_log_p = decode(zs)
     initial_log_p = initial_log_p.clone().detach()
     criterion = nn.CrossEntropyLoss()
@@ -82,16 +88,21 @@ def xgems(encode,
             'path_viz': tf.concat([x_start, x], 2)
         }
 
-    optimizer = optim.Adam(zs[0:1], lr=1e-3)
+    optim_lr = 1e-2
+    if type(zs) is list:
+        optimizer = optim.Adam(zs[0:1], lr=optim_lr)
+    else:
+        optimizer = optim.Adam([zs], lr=optim_lr)
 
-    for step in range(15000):
+    for step in range(2000):
         optimizer.zero_grad()
         x, log_p = decode(zs)
         logits = classifier(x)
         decode_loss = torch.mean((x_start - x)**2, (1, 2, 3))
         class_loss = criterion(logits, y_target.cuda())
+        loss = class_loss
         # loss = decode_loss + class_coef * class_loss
-        loss = class_loss + 1e-4 * torch.relu(initial_log_p - log_p)
+        # loss = class_loss + 1e-4 * torch.relu(initial_log_p - log_p)
         writer.add_scalar('xgem/log_p', log_p, step)
         writer.add_scalar('xgem/loss', loss, step)
         writer.add_scalar('xgem/class loss', class_loss, step)
@@ -111,38 +122,71 @@ def xgems(encode,
     return x_reencode_start, decode(zs)
 
 
-def run_xgems(dataset, weights_path, generator_checkpoint, class_coef=1.0, data_root='./datasets/', cuda_idx=0):
+def run_xgems(dataset,
+              classifier_net_type,
+              classifier_weights_path,
+              generator_net_type,
+              generator_weights_path,
+              class_coef=1.0,
+              data_root='./datasets/',
+              cuda_idx=0):
     torch.cuda.manual_seed(0)
-    in_test_loader = torch.utils.data.DataLoader(datasets.CIFAR10(root=data_root,
-                                                                  train=False,
-                                                                  download=True,
-                                                                  transform=transforms.ToTensor()),
-                                                 batch_size=1,
-                                                 shuffle=False)
-    classifier = ResNet34(10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
-    classifier.load_state_dict(torch.load(weights_path, map_location=f'cuda:{cuda_idx}'))
+    _, test_ds = load_datasets(dataset)
+    in_test_loader = torch.utils.data.DataLoader(test_ds, batch_size=1, shuffle=False)
+
+    if classifier_net_type == 'mnist':
+        classifier = MnistClassifier()
+        classifier.load_state_dict(torch.load(classifier_weights_path, map_location=f'cuda:0'))
+    elif classifier_net_type == 'cifar10':
+        classifier = ResNet34(
+            10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
+        classifier.load_state_dict(
+            torch.load(classifier_weights_path, map_location=f'cuda:{cuda_idx}'))
+
     classifier = classifier.cuda()
     classifier.eval()
 
-    checkpoint = torch.load(generator_checkpoint, map_location='cpu')
-    args = checkpoint['args']
-    nvae = load_nvae(generator_checkpoint, batch_size=1)
-    nvae = nvae.cuda()
-    nvae.eval()
+    if generator_net_type == 'mnist':
+        generator = MnistVAE()
+        generator.load_state_dict(torch.load(generator_weights_path))
+
+        def encode(x):
+            mu_z, log_sig_z = generator.encode(x)
+            mu_z = mu_z.unsqueeze(-1)
+            sig_z = F.softplus(log_sig_z).unsqueeze(-1).unsqueeze(-1) + 1e-3
+            pz = dist.multivariate_normal.MultivariateNormal(mu_z, sig_z)
+            pz = dist.independent.Independent(pz, 1)
+            z = pz.rsample().squeeze(-1)
+            return z
+
+        def decode(z):
+            mu_x_hat = generator.decode(z)
+            px_hat = dist.bernoulli.Bernoulli(logits=mu_x_hat)
+            px_hat = dist.independent.Independent(px_hat, 3)
+            # x_hat = mu_x_hat
+            x_hat = px_hat.sample()
+            log_p = generator.log_prob(x_hat)
+            return x_hat, log_p
+
+    elif generator_net_type == 'nvae':
+        generator = load_nvae(generator_weights_path, batch_size=1)
+
+        def encode(x):
+            z, combiner_cells_s = generator.encode(x)
+            return [z] + combiner_cells_s
+
+        def decode(zs):
+            z, combiner_cells_s = zs[0], zs[1:]
+            logits, log_p = generator.decode(z, combiner_cells_s, 1.)
+            return generator.decoder_output(logits).sample(), log_p
+
+    generator = generator.cuda()
+    generator.eval()
 
     for data, label in in_test_loader:
         break
 
     target_label = (label + 1) % 10
-
-    def encode(x):
-        z, combiner_cells_s = nvae.encode(x)
-        return [z] + combiner_cells_s
-
-    def decode(zs):
-        z, combiner_cells_s = zs[0], zs[1:]
-        logits, log_p = nvae.decode(z, combiner_cells_s, 1.)
-        return nvae.decoder_output(logits).sample(), log_p
 
     print('label', label)
     print('target label', target_label)

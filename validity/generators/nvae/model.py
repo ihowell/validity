@@ -67,7 +67,10 @@ class CellAR(nn.Module):
 
         self.use_mix_log_cdf = False
         if self.use_mix_log_cdf:
-            self.param = MixLogCDFParam(num_z, num_mix=3, num_ftr=self.conv.hidden_dim, mirror=mirror)
+            self.param = MixLogCDFParam(num_z,
+                                        num_mix=3,
+                                        num_ftr=self.conv.hidden_dim,
+                                        mirror=mirror)
         else:
             # 0.1 helps bring mu closer to 0 initially
             self.mu = ARELUConv(self.conv.hidden_dim,
@@ -150,11 +153,13 @@ class AutoEncoder(nn.Module):
         # used for generative purpose
         c_scaling = CHANNEL_MULT**(self.num_preprocess_blocks + self.num_latent_scales - 1)
         spatial_scaling = 2**(self.num_preprocess_blocks + self.num_latent_scales - 1)
-        prior_ftr0_size = (int(c_scaling * self.num_channels_dec), self.input_size // spatial_scaling,
+        prior_ftr0_size = (int(c_scaling * self.num_channels_dec),
+                           self.input_size // spatial_scaling,
                            self.input_size // spatial_scaling)
         self.prior_ftr0 = nn.Parameter(torch.rand(size=prior_ftr0_size), requires_grad=True)
         self.z0_size = [
-            self.num_latent_per_group, self.input_size // spatial_scaling, self.input_size // spatial_scaling
+            self.num_latent_per_group, self.input_size // spatial_scaling,
+            self.input_size // spatial_scaling
         ]
 
         self.stem = self.init_stem()
@@ -174,7 +179,9 @@ class AutoEncoder(nn.Module):
 
         if self.vanilla_vae:
             self.dec_tower = []
-            self.stem_decoder = Conv2D(self.num_latent_per_group, mult * self.num_channels_enc, (1, 1), bias=True)
+            self.stem_decoder = Conv2D(self.num_latent_per_group,
+                                       mult * self.num_channels_enc, (1, 1),
+                                       bias=True)
         else:
             self.dec_tower, mult = self.init_decoder_tower(mult)
 
@@ -216,12 +223,20 @@ class AutoEncoder(nn.Module):
                     arch = self.arch_instance['down_pre']
                     num_ci = int(self.num_channels_enc * mult)
                     num_co = int(CHANNEL_MULT * num_ci)
-                    cell = Cell(num_ci, num_co, cell_type='down_pre', arch=arch, use_se=self.use_se)
+                    cell = Cell(num_ci,
+                                num_co,
+                                cell_type='down_pre',
+                                arch=arch,
+                                use_se=self.use_se)
                     mult = CHANNEL_MULT * mult
                 else:
                     arch = self.arch_instance['normal_pre']
                     num_c = self.num_channels_enc * mult
-                    cell = Cell(num_c, num_c, cell_type='normal_pre', arch=arch, use_se=self.use_se)
+                    cell = Cell(num_c,
+                                num_c,
+                                cell_type='normal_pre',
+                                arch=arch,
+                                use_se=self.use_se)
 
                 pre_process.append(cell)
 
@@ -234,7 +249,11 @@ class AutoEncoder(nn.Module):
                 for c in range(self.num_cell_per_cond_enc):
                     arch = self.arch_instance['normal_enc']
                     num_c = int(self.num_channels_enc * mult)
-                    cell = Cell(num_c, num_c, cell_type='normal_enc', arch=arch, use_se=self.use_se)
+                    cell = Cell(num_c,
+                                num_c,
+                                cell_type='normal_enc',
+                                arch=arch,
+                                use_se=self.use_se)
                     enc_tower.append(cell)
 
                 # add encoder combiner
@@ -249,7 +268,11 @@ class AutoEncoder(nn.Module):
                 arch = self.arch_instance['down_enc']
                 num_ci = int(self.num_channels_enc * mult)
                 num_co = int(CHANNEL_MULT * num_ci)
-                cell = Cell(num_ci, num_co, cell_type='down_enc', arch=arch, use_se=self.use_se)
+                cell = Cell(num_ci,
+                            num_co,
+                            cell_type='down_enc',
+                            arch=arch,
+                            use_se=self.use_se)
                 enc_tower.append(cell)
                 mult = CHANNEL_MULT * mult
 
@@ -257,7 +280,8 @@ class AutoEncoder(nn.Module):
 
     def init_encoder0(self, mult):
         num_c = int(self.num_channels_enc * mult)
-        cell = nn.Sequential(nn.ELU(), Conv2D(num_c, num_c, kernel_size=1, bias=True), nn.ELU())
+        cell = nn.Sequential(nn.ELU(), Conv2D(num_c, num_c, kernel_size=1, bias=True),
+                             nn.ELU())
         return cell
 
     def init_normal_sampler(self, mult):
@@ -267,18 +291,29 @@ class AutoEncoder(nn.Module):
             for g in range(self.groups_per_scale[self.num_latent_scales - s - 1]):
                 # build mu, sigma generator for encoder
                 num_c = int(self.num_channels_enc * mult)
-                cell = Conv2D(num_c, 2 * self.num_latent_per_group, kernel_size=3, padding=1, bias=True)
+                cell = Conv2D(num_c,
+                              2 * self.num_latent_per_group,
+                              kernel_size=3,
+                              padding=1,
+                              bias=True)
                 enc_sampler.append(cell)
                 # build NF
                 for n in range(self.num_flows):
                     arch = self.arch_instance['ar_nn']
                     num_c1 = int(self.num_channels_enc * mult)
                     num_c2 = 8 * self.num_latent_per_group  # use 8x features
-                    nf_cells.append(PairedCellAR(self.num_latent_per_group, num_c1, num_c2, arch))
-                if not (s == 0 and g == 0):  # for the first group, we use a fixed standard Normal.
+                    nf_cells.append(
+                        PairedCellAR(self.num_latent_per_group, num_c1, num_c2, arch))
+                if not (s == 0
+                        and g == 0):  # for the first group, we use a fixed standard Normal.
                     num_c = int(self.num_channels_dec * mult)
                     cell = nn.Sequential(
-                        nn.ELU(), Conv2D(num_c, 2 * self.num_latent_per_group, kernel_size=1, padding=0, bias=True))
+                        nn.ELU(),
+                        Conv2D(num_c,
+                               2 * self.num_latent_per_group,
+                               kernel_size=1,
+                               padding=0,
+                               bias=True))
                     dec_sampler.append(cell)
 
             mult = mult / CHANNEL_MULT
@@ -294,10 +329,17 @@ class AutoEncoder(nn.Module):
                 if not (s == 0 and g == 0):
                     for c in range(self.num_cell_per_cond_dec):
                         arch = self.arch_instance['normal_dec']
-                        cell = Cell(num_c, num_c, cell_type='normal_dec', arch=arch, use_se=self.use_se)
+                        cell = Cell(num_c,
+                                    num_c,
+                                    cell_type='normal_dec',
+                                    arch=arch,
+                                    use_se=self.use_se)
                         dec_tower.append(cell)
 
-                cell = DecCombinerCell(num_c, self.num_latent_per_group, num_c, cell_type='combiner_dec')
+                cell = DecCombinerCell(num_c,
+                                       self.num_latent_per_group,
+                                       num_c,
+                                       cell_type='combiner_dec')
                 dec_tower.append(cell)
 
             # down cells after finishing a scale
@@ -319,12 +361,20 @@ class AutoEncoder(nn.Module):
                     arch = self.arch_instance['up_post']
                     num_ci = int(self.num_channels_dec * mult)
                     num_co = int(num_ci / CHANNEL_MULT)
-                    cell = Cell(num_ci, num_co, cell_type='up_post', arch=arch, use_se=self.use_se)
+                    cell = Cell(num_ci,
+                                num_co,
+                                cell_type='up_post',
+                                arch=arch,
+                                use_se=self.use_se)
                     mult = mult / CHANNEL_MULT
                 else:
                     arch = self.arch_instance['normal_post']
                     num_c = int(self.num_channels_dec * mult)
-                    cell = Cell(num_c, num_c, cell_type='normal_post', arch=arch, use_se=self.use_se)
+                    cell = Cell(num_c,
+                                num_c,
+                                cell_type='normal_post',
+                                arch=arch,
+                                use_se=self.use_se)
 
                 post_process.append(cell)
 
@@ -403,7 +453,8 @@ class AutoEncoder(nn.Module):
                     ftr = combiner_cells_enc[idx_dec - 1](combiner_cells_s[idx_dec - 1], s)
                     param = self.enc_sampler[idx_dec](ftr)
                     mu_q, log_sig_q = torch.chunk(param, 2, dim=1)
-                    dist = Normal(mu_p + mu_q, log_sig_p + log_sig_q) if self.res_dist else Normal(mu_q, log_sig_q)
+                    dist = Normal(mu_p + mu_q, log_sig_p +
+                                  log_sig_q) if self.res_dist else Normal(mu_q, log_sig_q)
                     z, _ = dist.sample()
                     log_q_conv = dist.log_p(z)
                     # apply NF
@@ -450,6 +501,12 @@ class AutoEncoder(nn.Module):
             log_p += torch.sum(log_p_conv, dim=[1, 2, 3])
 
         return logits, log_q, log_p, kl_all, kl_diag
+
+    def log_prob(self, x):
+        with torch.no_grad():
+            logits, log_q, log_p, kl_all, kl_diag = self.forward(x)
+        elbo = log_p - torch.cat(kl_all).sum(0)
+        return elbo
 
     def encode(self, x):
         s = self.stem(2 * x - 1.0)
@@ -500,7 +557,9 @@ class AutoEncoder(nn.Module):
         all_log_p = [log_p_conv]
 
         nf_offset = self.num_flows
-        combiner_cells_enc = [cell for cell in self.enc_tower if cell.cell_type == 'combiner_enc']
+        combiner_cells_enc = [
+            cell for cell in self.enc_tower if cell.cell_type == 'combiner_enc'
+        ]
         combiner_cells_enc.reverse()
 
         idx_dec = 0
@@ -519,7 +578,8 @@ class AutoEncoder(nn.Module):
                     param = self.enc_sampler[idx_dec](ftr)
 
                     mu_q, log_sig_q = torch.chunk(param, 2, dim=1)
-                    dist = Normal(mu_p + mu_q, log_sig_p + log_sig_q) if self.res_dist else Normal(mu_q, log_sig_q)
+                    dist = Normal(mu_p + mu_q, log_sig_p +
+                                  log_sig_q) if self.res_dist else Normal(mu_q, log_sig_q)
                     z, _ = dist.sample()
                     log_q_conv = dist.log_p(z)
                     # apply NF
@@ -557,7 +617,9 @@ class AutoEncoder(nn.Module):
     def sample(self, num_samples, t):
         scale_ind = 0
         z0_size = [num_samples] + self.z0_size
-        dist = Normal(mu=torch.zeros(z0_size).cuda(), log_sigma=torch.zeros(z0_size).cuda(), temp=t)
+        dist = Normal(mu=torch.zeros(z0_size).cuda(),
+                      log_sigma=torch.zeros(z0_size).cuda(),
+                      temp=t)
         z, _ = dist.sample()
 
         idx_dec = 0
@@ -594,8 +656,9 @@ class AutoEncoder(nn.Module):
         if self.dataset in {'mnist', 'omniglot'}:
             return Bernoulli(logits=logits)
         elif self.dataset in {
-                'stacked_mnist', 'cifar10', 'celeba_64', 'celeba_256', 'imagenet_32', 'imagenet_64', 'ffhq',
-                'lsun_bedroom_128', 'lsun_bedroom_256', 'lsun_church_64', 'lsun_church_128'
+                'stacked_mnist', 'cifar10', 'celeba_64', 'celeba_256', 'imagenet_32',
+                'imagenet_64', 'ffhq', 'lsun_bedroom_128', 'lsun_bedroom_256',
+                'lsun_church_64', 'lsun_church_128'
         }:
             if self.num_mix_output == 1:
                 return NormalDecoder(logits, num_bits=self.num_bits)
@@ -624,8 +687,12 @@ class AutoEncoder(nn.Module):
                 num_iter = self.num_power_iter
                 if i not in self.sr_u:
                     num_w, row, col = weights[i].shape
-                    self.sr_u[i] = F.normalize(torch.ones(num_w, row).normal_(0, 1).cuda(), dim=1, eps=1e-3)
-                    self.sr_v[i] = F.normalize(torch.ones(num_w, col).normal_(0, 1).cuda(), dim=1, eps=1e-3)
+                    self.sr_u[i] = F.normalize(torch.ones(num_w, row).normal_(0, 1).cuda(),
+                                               dim=1,
+                                               eps=1e-3)
+                    self.sr_v[i] = F.normalize(torch.ones(num_w, col).normal_(0, 1).cuda(),
+                                               dim=1,
+                                               eps=1e-3)
                     # increase the number of iterations for the first time
                     num_iter = 10 * self.num_power_iter
 
@@ -633,14 +700,17 @@ class AutoEncoder(nn.Module):
                     # Spectral norm of weight equals to `u^T W v`, where `u` and `v`
                     # are the first left and right singular vectors.
                     # This power iteration produces approximations of `u` and `v`.
-                    self.sr_v[i] = F.normalize(torch.matmul(self.sr_u[i].unsqueeze(1), weights[i]).squeeze(1),
+                    self.sr_v[i] = F.normalize(torch.matmul(self.sr_u[i].unsqueeze(1),
+                                                            weights[i]).squeeze(1),
                                                dim=1,
                                                eps=1e-3)  # bx1xr * bxrxc --> bx1xc --> bxc
-                    self.sr_u[i] = F.normalize(torch.matmul(weights[i], self.sr_v[i].unsqueeze(2)).squeeze(2),
+                    self.sr_u[i] = F.normalize(torch.matmul(
+                        weights[i], self.sr_v[i].unsqueeze(2)).squeeze(2),
                                                dim=1,
                                                eps=1e-3)  # bxrxc * bxcx1 --> bxrx1  --> bxr
 
-            sigma = torch.matmul(self.sr_u[i].unsqueeze(1), torch.matmul(weights[i], self.sr_v[i].unsqueeze(2)))
+            sigma = torch.matmul(self.sr_u[i].unsqueeze(1),
+                                 torch.matmul(weights[i], self.sr_v[i].unsqueeze(2)))
             loss += torch.sum(sigma)
         return loss
 

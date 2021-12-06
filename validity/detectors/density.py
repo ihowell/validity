@@ -12,11 +12,12 @@ import torch
 from tqdm import tqdm
 from torchvision import datasets, transforms
 
-from sklearn.neighbors import KernelDensity
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
+from sklearn.neighbors import KernelDensity
 
 from validity.adv_dataset import load_adv_dataset
+from validity.datasets import load_datasets
 
 BANDWIDTHS = {'mnist': 1.20, 'cifar10': 0.26, 'svhn': 1.00}
 
@@ -36,8 +37,7 @@ class DensityDetector:
         self.kdes = {}
         for label in range(self.num_labels):
             activations = []
-            for data, labels in tqdm(in_train_loader,
-                                     desc=f'Training kde {label}'):
+            for data, labels in tqdm(in_train_loader, desc=f'Training kde {label}'):
                 data = data.cuda()
                 labels = labels.cuda()
 
@@ -50,16 +50,14 @@ class DensityDetector:
             activations = np.concatenate(activations)
             activations = np.reshape(activations, (activations.shape[0], -1))
             self.kdes[label] = KernelDensity(
-                kernel='gaussian',
-                bandwidth=BANDWIDTHS[self.train_ds_name]).fit(activations)
+                kernel='gaussian', bandwidth=BANDWIDTHS[self.train_ds_name]).fit(activations)
 
     def train_lr(self, in_train_loader, out_train_loader, noise_train_loader):
         clean_densities = self.score_loader(in_train_loader)
         adv_densities = self.score_loader(out_train_loader)
         noise_densities = self.score_loader(noise_train_loader)
 
-        densities = np.concatenate(
-            [clean_densities, noise_densities, adv_densities])
+        densities = np.concatenate([clean_densities, noise_densities, adv_densities])
         labels = np.concatenate([
             np.zeros(clean_densities.shape[0]),
             np.ones(noise_densities.shape[0] + adv_densities.shape[0])
@@ -72,8 +70,7 @@ class DensityDetector:
         adv_densities = self.score_loader(out_test_loader)
         noise_densities = self.score_loader(noise_test_loader)
 
-        densities = np.concatenate(
-            [clean_densities, noise_densities, adv_densities])
+        densities = np.concatenate([clean_densities, noise_densities, adv_densities])
         labels = np.concatenate([
             np.zeros(clean_densities.shape[0]),
             np.ones(noise_densities.shape[0] + adv_densities.shape[0])
@@ -110,36 +107,44 @@ class DensityDetector:
         for label, kde in self.kdes.items():
             print(f'Computing density score for label: {label}')
             p = mp.Pool()
-            dens = p.map(
-                kde.score_samples,
-                [activations[i:i + 1] for i in range(activations.shape[0])])
+            dens = p.map(kde.score_samples,
+                         [activations[i:i + 1] for i in range(activations.shape[0])])
             dens = np.concatenate(dens)
             densities.append(dens)
         densities = np.stack(densities, -1)
         return densities
 
 
-def train_density_adv(net_type,
-                      weights_path,
+def train_density_adv(dataset,
+                      net_type,
+                      weights_location,
                       adv_attack,
                       cuda_idx=0,
                       data_root='./datasets/'):
     from validity.classifiers.resnet import ResNet34
+    from validity.classifiers.mnist import MnistClassifier
     from validity.adv_dataset import load_adv_dataset
     torch.cuda.manual_seed(0)
     np.random.seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    network = ResNet34(
-        10,
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010)))
-    network.load_state_dict(
-        torch.load(weights_path, map_location=f'cuda:{cuda_idx}'))
-    network.cuda()
+    if net_type == 'mnist':
+        network = MnistClassifier()
+        network.load_state_dict(torch.load(weights_location, map_location=f'cuda:0'))
+    elif net_type == 'resnet':
+        network = ResNet34(
+            10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
+        network.load_state_dict(torch.load(weights_location, map_location=f'cuda:0'))
+    network = network.cuda()
 
-    clean_data, adv_data, noise_data = load_adv_dataset(
-        'cifar10', adv_attack, 'resnet')
+    if dataset == 'mnist':
+        num_labels = 10
+    elif dataset == 'cifar10':
+        num_labels = 10
+    else:
+        raise Exception('Dataset provided with unknown number of labels')
+
+    clean_data, adv_data, noise_data = load_adv_dataset(dataset, adv_attack, net_type)
     idx = np.arange(clean_data.shape[0])
     np.random.shuffle(idx)
     pivot = int(clean_data.shape[0] * 0.1)
@@ -168,35 +173,32 @@ def train_density_adv(net_type,
                 batch = self.ds[i * self.batch_size:(i + 1) * self.batch_size]
                 yield torch.tensor(batch), torch.tensor(label)
 
-    detector = DensityDetector(model=network,
-                               num_labels=10,
-                               train_ds_name='cifar10')
+    detector = DensityDetector(model=network, num_labels=num_labels, train_ds_name=dataset)
 
-    in_train_loader = torch.utils.data.DataLoader(datasets.CIFAR10(
-        root=data_root,
-        train=True,
-        download=True,
-        transform=transforms.ToTensor()),
-                                                  batch_size=64,
-                                                  shuffle=True)
+    print('Training KDEs')
+    in_train_ds, _ = load_datasets(dataset)
+    in_train_loader = torch.utils.data.DataLoader(in_train_ds, batch_size=64, shuffle=True)
     detector.train_kdes(in_train_loader)
 
+    print('Training LR')
     in_train_loader = np_loader(clean_train_data, True)
     out_train_loader = np_loader(adv_train_data, False)
     noise_train_loader = np_loader(noise_train_data, False)
-
     detector.train_lr(in_train_loader, out_train_loader, noise_train_loader)
 
+    print('Evaluating')
     in_test_loader = np_loader(clean_test_data, True)
     out_test_loader = np_loader(adv_test_data, False)
     noise_test_loader = np_loader(noise_test_data, False)
+    results = detector.evaluate(in_test_loader, out_test_loader, noise_test_loader)
 
-    results = detector.evaluate(in_test_loader, out_test_loader,
-                                noise_test_loader)
-
-    save_path = pathlib.Path('density', f'{net_type}_cifar10_{adv_attack}.pt')
+    save_path = pathlib.Path('adv', f'density_{net_type}_{dataset}_{adv_attack}.pt')
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(detector, save_path)
+
+    res_save_path = pathlib.Path('adv',
+                                 f'density_{net_type}_{dataset}_{adv_attack}_results.pt')
+    torch.save(results, res_save_path)
 
     for result_name, result in results.items():
         if type(result) in [dict, tuple, list]:

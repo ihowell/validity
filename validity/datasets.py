@@ -29,7 +29,7 @@ def load_datasets(dataset, data_root='./datasets'):
                                    train=False,
                                    download=True,
                                    transform=transforms.ToTensor())
-    elif datasets == 'svhn':
+    elif dataset == 'svhn':
         train_ds = datasets.SVHN(root=data_root,
                                  split='train',
                                  download=True,

@@ -65,12 +65,14 @@ class LIDDetector:
 
         LID_val = np.concatenate([LID_in_val, LID_noise_val, LID_out_val])
         LID_test = np.concatenate([LID_in_test, LID_noise_test, LID_out_test])
-        labels_val = np.concatenate(
-            [np.ones(LID_in_val.shape[0] + LID_noise_val.shape[0]),
-             np.zeros(LID_out_val.shape[0])])
-        labels_test = np.concatenate(
-            [np.ones(LID_in_test.shape[0] + LID_noise_test.shape[0]),
-             np.zeros(LID_out_test.shape[0])])
+        labels_val = np.concatenate([
+            np.ones(LID_in_val.shape[0] + LID_noise_val.shape[0]),
+            np.zeros(LID_out_val.shape[0])
+        ])
+        labels_test = np.concatenate([
+            np.ones(LID_in_test.shape[0] + LID_noise_test.shape[0]),
+            np.zeros(LID_out_test.shape[0])
+        ])
 
         # Train regressor
         print('Training regressor')
@@ -108,7 +110,8 @@ class LIDDetector:
         output, out_features = self.model.feature_list(data)
         X_act = []
         for i in range(self.num_outputs):
-            out_features[i] = out_features[i].view(out_features[i].size(0), out_features[i].size(1), -1)
+            out_features[i] = out_features[i].view(out_features[i].size(0),
+                                                   out_features[i].size(1), -1)
             out_features[i] = torch.mean(out_features[i].data, 2)
             X_act.append(out_features[i].cpu().numpy().reshape((out_features[i].size(0), -1)))
 
@@ -147,17 +150,29 @@ def mle_batch(data, batch, k):
     return a
 
 
-def train_lid_adv(net_type, weights_path, adv_attack, data_root='./datasets', cuda_idx=0, k=10):
+def train_lid_adv(dataset,
+                  net_type,
+                  weights_path,
+                  adv_attack,
+                  data_root='./datasets',
+                  cuda_idx=0,
+                  k=10):
     from validity.classifiers.resnet import ResNet34
+    from validity.classifiers.mnist import MnistClassifier
     from validity.adv_dataset import load_adv_dataset
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    network = ResNet34(10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
-    network.load_state_dict(torch.load(weights_path, map_location=f'cuda:{cuda_idx}'))
-    network.cuda()
+    if net_type == 'mnist':
+        network = MnistClassifier()
+        network.load_state_dict(torch.load(weights_path, map_location=f'cuda:0'))
+    elif net_type == 'resnet':
+        network = ResNet34(
+            10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
+        network.load_state_dict(torch.load(weights_path, map_location=f'cuda:0'))
+    network = network.cuda()
 
-    clean_data, adv_data, noisy_data = load_adv_dataset('cifar10', adv_attack, 'resnet')
+    clean_data, adv_data, noisy_data = load_adv_dataset(dataset, adv_attack, net_type)
 
     class np_loader:
         def __init__(self, ds, label_is_ones):
@@ -181,9 +196,13 @@ def train_lid_adv(net_type, weights_path, adv_attack, data_root='./datasets', cu
     noise_test_loader = np_loader(noisy_data, True)
     results = detector.evaluate(in_test_loader, out_test_loader, noise_test_loader)
 
-    save_path = pathlib.Path('lid', f'lid_{net_type}_cifar10_{adv_attack}_{k}.pt')
+    save_path = pathlib.Path('adv', f'lid_{net_type}_{dataset}_{adv_attack}_{k}.pt')
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(detector, save_path)
+
+    save_res_path = pathlib.Path('adv', f'lid_{net_type}_{dataset}_{adv_attack}_{k}_res.pt')
+    torch.save(results, save_res_path)
+
     print(f'K = {k}:')
     for result_name, result in results.items():
         if type(result) in [dict, tuple, list]:
@@ -197,7 +216,12 @@ def train_lid_adv(net_type, weights_path, adv_attack, data_root='./datasets', cu
     return detector, results
 
 
-def train_multiple_lid_adv(net_type, weights_path, adv_attack, data_root='./datasets/', cuda_idx=0, latex_print=False):
+def train_multiple_lid_adv(net_type,
+                           weights_path,
+                           adv_attack,
+                           data_root='./datasets/',
+                           cuda_idx=0,
+                           latex_print=False):
     k_list = range(10, 100, 10)
     result_table = [['K', 'AUC Score', 'FPR at TPR=0.95']]
 
@@ -205,7 +229,12 @@ def train_multiple_lid_adv(net_type, weights_path, adv_attack, data_root='./data
     best_auc = None
 
     for k in k_list:
-        detector, res = train_lid_adv(net_type, weights_path, adv_attack, data_root=data_root, cuda_idx=cuda_idx, k=k)
+        detector, res = train_lid_adv(net_type,
+                                      weights_path,
+                                      adv_attack,
+                                      data_root=data_root,
+                                      cuda_idx=cuda_idx,
+                                      k=k)
         fpr, tpr = res['plot']
         plt.plot(fpr, tpr, label=str(k))
         row = [k, res['auc_score'], res['fpr_at_tpr_95']]
@@ -218,13 +247,13 @@ def train_multiple_lid_adv(net_type, weights_path, adv_attack, data_root='./data
             best_detector = detector
             best_auc = res['auc_score']
 
-    save_path = pathlib.Path('lid', f'lid_{net_type}_cifar10_{adv_attack}_best.pt')
+    save_path = pathlib.Path('adv', f'lid_{net_type}_{dataset}_{adv_attack}_best.pt')
     torch.save(best_detector, save_path)
 
     plt.xlabel('FPR')
     plt.ylabel('TPR')
     plt.legend()
-    plt.savefig('lid/adv_results.png')
+    plt.savefig('adv/lid_results.png')
 
     if latex_print:
         print(' & '.join(result_table[0]) + '\\\\')
@@ -238,13 +267,13 @@ def train_multiple_lid_adv(net_type, weights_path, adv_attack, data_root='./data
 
 
 def load_lid(net_type, dataset, adv_attack, k):
-    save_path = pathlib.Path('lid', f'lid_{net_type}_{dataset}_{adv_attack}_{k}.pt')
+    save_path = pathlib.Path('adv', f'lid_{net_type}_{dataset}_{adv_attack}_{k}.pt')
     assert save_path.exists()
     return torch.load(save_path)
 
 
 def load_best_lid(net_type, dataset, adv_attack):
-    save_path = pathlib.Path('lid', f'lid_{net_type}_{dataset}_{adv_attack}_best.pt')
+    save_path = pathlib.Path('adv', f'lid_{net_type}_{dataset}_{adv_attack}_best.pt')
     assert save_path.exists()
     return torch.load(save_path)
 
