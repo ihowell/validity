@@ -10,6 +10,7 @@ from torchvision import transforms, datasets
 from tensorboardX import SummaryWriter
 
 from validity.util import EarlyStopping
+from .mixture import discretized_mix_logistic_loss, sample_from_discretized_mix_logistic
 
 EPSILON = torch.tensor(1e-6)
 SIG_EPSILON = 6e-3
@@ -19,15 +20,6 @@ CLIP_GRAD_VALUE = 1.
 
 LN_2 = torch.log(torch.tensor(2.))
 LOG2T = torch.log2(torch.tensor(1 - 2 * EPSILON))
-
-
-def input_transform(z):
-    # z is input tensor in range [0., 1.]. We rescale to [EPS, 1-EPS]
-    return (EPSILON + (1 - 2 * EPSILON) * z).logit()
-
-
-def reverse_transform(x):
-    return (x.sigmoid() - EPSILON) / (1 - 2 * EPSILON)
 
 
 class EncResCell(nn.Module):
@@ -69,9 +61,10 @@ class DecResCell(nn.Module):
 
 
 class MnistVAE(nn.Module):
-    def __init__(self, beta=1.):
+    def __init__(self, beta=1., num_logistic=10):
         super().__init__()
         self.beta = beta
+        self.num_logistic = num_logistic
 
         self.tied_log_sig_z = nn.Parameter(torch.tensor([0.], requires_grad=True))
         self.tied_log_sig_x_hat = nn.Parameter(torch.zeros((28, 28), requires_grad=True))
@@ -110,16 +103,24 @@ class MnistVAE(nn.Module):
             EncResCell(128),
             nn.ELU(),
         ])
-        self.linear_mu = nn.Linear(3200, 400)
+        self.linear_mu = nn.Linear(3200, 600)
 
-        self.latent_shape = (400, )
+        self.latent_shape = (600, )
 
         self.dec_layers = nn.ModuleList([
-            nn.Linear(400, 1600),
+            nn.Linear(600, 1600),
             nn.Unflatten(-1, (64, 5, 5)),
-            nn.ConvTranspose2d(64, 64, 5, stride=2),
+            nn.ConvTranspose2d(64, 128, 5, stride=2),
             nn.ELU(),
-            nn.ConvTranspose2d(64, 128, 5, stride=2, output_padding=1, padding=1),
+            nn.ConvTranspose2d(128, 256, 5, stride=2, output_padding=1, padding=1),
+            nn.ELU(),
+            DecResCell(256),
+            nn.ELU(),
+            DecResCell(256),
+            nn.ELU(),
+            DecResCell(256),
+            nn.ELU(),
+            nn.Conv2d(256, 128, 3, padding='same'),
             nn.ELU(),
             DecResCell(128),
             nn.ELU(),
@@ -135,36 +136,7 @@ class MnistVAE(nn.Module):
             nn.ELU(),
             DecResCell(64),
             nn.ELU(),
-            nn.Conv2d(64, 32, 3, padding='same'),
-            nn.ELU(),
-            DecResCell(32),
-            nn.ELU(),
-            DecResCell(32),
-            nn.ELU(),
-            nn.Conv2d(32, 16, 3, padding='same'),
-            nn.ELU(),
-            DecResCell(16),
-            nn.ELU(),
-            DecResCell(16),
-            nn.ELU(),
-            nn.Conv2d(16, 8, 3, padding='same'),
-            nn.ELU(),
-            DecResCell(8),
-            nn.ELU(),
-            DecResCell(8),
-            nn.ELU(),
-            nn.Conv2d(8, 4, 3, padding='same'),
-            nn.ELU(),
-            DecResCell(4),
-            nn.ELU(),
-            DecResCell(4),
-            nn.ELU(),
-            nn.Conv2d(4, 4, 5, padding='same'),
-            nn.Conv2d(4, 4, 3, padding='same'),
-            nn.Conv2d(4, 4, 1, padding='same'),
-            nn.Conv2d(4, 1, 5, padding='same'),
-            nn.Conv2d(1, 1, 3, padding='same'),
-            nn.Conv2d(1, 1, 1, padding='same'),
+            nn.Conv2d(64, 3 * self.num_logistic, 3, padding='same'),
         ])
 
     def encode(self, x):
@@ -180,12 +152,9 @@ class MnistVAE(nn.Module):
     def decode(self, z):
         # Decode code to a random sample
         mu_x_hat = self._decode(z)
-        # sig_x_hat = torch.exp(-F.softplus(self.tied_log_sig_x_hat)) + SIG_EPSILON
-        # px_hat = dist.normal.Normal(mu_x_hat, sig_x_hat)
-        # px_hat = dist.independent.Independent(px_hat, 3)
-        # x_hat_logits = px_hat.sample().clamp(EPSILON.logit(), (-EPSILON + 1.).logit())
-        # x_hat = reverse_transform(x_hat_logits).clamp(0., 1.)
-        x_hat = reverse_transform(mu_x_hat).clamp(0., 1.)
+        x_hat = x_hat.view(num_samples, self.num_logistic * 3, -1)
+        x_hat = sample_from_discretized_mix_logistic(x_hat)
+        x_hat = x_hat.view(num_samples, 1, 28, 28)
         return x_hat
 
     def _encode(self, x):
@@ -205,8 +174,7 @@ class MnistVAE(nn.Module):
         return out
 
     def forward(self, x):
-        orig_x = x
-        x = input_transform(x)
+        n = x.size(0)
 
         # encode
         mu_z = self._encode(x)
@@ -216,16 +184,12 @@ class MnistVAE(nn.Module):
         z = pz.rsample()
 
         # decode
-        mu_x_hat = self._decode(z)
-        sig_x_hat = torch.exp(-F.softplus(self.tied_log_sig_x_hat)) + SIG_EPSILON
-        px_hat = dist.normal.Normal(mu_x_hat, sig_x_hat)
-        px_hat = dist.independent.Independent(px_hat, 3)
-        x_hat_logits = px_hat.sample().clamp(EPSILON.logit(), (-EPSILON + 1.).logit())
-        x_hat = reverse_transform(x_hat_logits).clamp(0., 1.)
-        # x_hat = px_hat.sample().clamp(0., 1.)
-
-        # posterior nll
-        posterior_nll = -1. * px_hat.log_prob(x)
+        x_hat = self._decode(z)
+        x_hat = x_hat.view(n, self.num_logistic * 3, -1)
+        posterior_nll = discretized_mix_logistic_loss(x_hat, x.view(n, -1, 1), reduce=False)
+        posterior_nll = posterior_nll.sum([1, 2])
+        x_hat = sample_from_discretized_mix_logistic(x_hat)
+        x_hat = x_hat.view(n, 1, 28, 28)
 
         # prior z
         mu_p = torch.zeros_like(mu_z).cuda()
@@ -240,20 +204,16 @@ class MnistVAE(nn.Module):
         nelbo = kl + posterior_nll
         loss = self.beta * kl + posterior_nll
 
-        D = torch.tensor(x.shape).prod()
-        logit_inverse = 1 / D * (torch.log2(x_hat_logits.sigmoid()) +
-                                 torch.log2(1 - x_hat_logits.sigmoid())).flatten(1).sum(1)
-        bits_per_dim = nelbo / (D * LN_2) - LOG2T + 8. + logit_inverse
+        # bpd
+        D = torch.tensor(x.shape[1:]).prod()
+        bits_per_dim = posterior_nll / (D * LN_2)
 
         metrics = {
             'nelbo': nelbo,
             'bits_per_dim': bits_per_dim,
             'kl': kl,
             'posterior_nll': posterior_nll,
-            'sig_x_hat_min': sig_x_hat.min(),
-            'sig_x_hat_mean': sig_x_hat.mean(),
-            'sig_x_hat_max': sig_x_hat.max(),
-            'reconstruction_img': torch.cat([orig_x, x_hat], dim=2)[:3]
+            'reconstruction_img': torch.cat([x, x_hat], dim=2)[:3]
         }
 
         return loss, metrics
@@ -266,12 +226,10 @@ class MnistVAE(nn.Module):
         prior = dist.independent.Independent(prior, 1)
         z = prior.rsample()
 
-        mu_x_hat = self._decode(z)
-        sig_x_hat = torch.exp(-F.softplus(self.tied_log_sig_x_hat)) + SIG_EPSILON
-        px_hat = dist.normal.Normal(mu_x_hat, sig_x_hat)
-        px_hat = dist.independent.Independent(px_hat, 3)
-        x_hat_logits = px_hat.sample().clamp(EPSILON.logit(), (-EPSILON + 1.).logit())
-        x_hat = reverse_transform(x_hat_logits).clamp(0., 1.)
+        x_hat = self._decode(z)
+        x_hat = x_hat.view(num_samples, self.num_logistic * 3, -1)
+        x_hat = sample_from_discretized_mix_logistic(x_hat)
+        x_hat = x_hat.view(num_samples, 1, 28, 28)
         return x_hat
 
     def log_prob(self, x):
@@ -345,8 +303,8 @@ def train(beta=1.,
             loss = loss.mean()
             loss.backward()
             nn.utils.clip_grad_value_(vae.parameters(), CLIP_GRAD_VALUE)
-            max_grad = torch.tensor([a.grad.max() for a in vae.parameters()]).max()
-            writer.add_scalar('train/max_grad', max_grad, step)
+            # max_grad = torch.tensor([a.grad.max() for a in vae.parameters()]).max()
+            # writer.add_scalar('train/max_grad', max_grad, step)
 
             optimizer.step()
             step += 1
