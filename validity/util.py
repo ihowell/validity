@@ -19,7 +19,7 @@ class np_loader:
 
 
 class EarlyStopping:
-    def __init__(self, vars_to_save, save_path, patience=20, threshold=0.005):
+    def __init__(self, vars_to_save=None, save_path=None, patience=20, threshold=0.005):
         self.save_path = save_path
         self.vars_to_save = vars_to_save
         self.patience = patience
@@ -49,7 +49,8 @@ class EarlyStopping:
             if loss < 0.:
                 self.loss_offset = 1. - loss
             self.best_step = self.step
-            torch.save(self.vars_to_save, self.save_path)
+            if self.vars_to_save:
+                torch.save(self.vars_to_save, self.save_path)
             return False
 
         return self.step - self.best_step >= self.patience

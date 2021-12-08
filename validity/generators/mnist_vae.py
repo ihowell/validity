@@ -16,10 +16,56 @@ EPSILON = torch.tensor(1e-6)
 SIG_EPSILON = 6e-3
 LOG_EPSILON = torch.log(EPSILON).cuda()
 SIG_MAX = torch.log(torch.tensor([1e5])).cuda()
-CLIP_GRAD_VALUE = 1.
+CLIP_GRAD_VALUE = 2e-2
 
 LN_2 = torch.log(torch.tensor(2.))
 LOG2T = torch.log2(torch.tensor(1 - 2 * EPSILON))
+
+CHANNEL_MULT = 2
+
+
+class Identity(nn.Module):
+    def __init__(self):
+        super(Identity, self).__init__()
+
+    def forward(self, x):
+        return x
+
+
+class UpSample(nn.Module):
+    def __init__(self):
+        super(UpSample, self).__init__()
+        pass
+
+    def forward(self, x):
+        return F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=True)
+
+
+def get_skip_connection(C, stride, affine, channel_mult):
+    if stride == 1:
+        return Identity()
+    elif stride == 2:
+        return FactorizedReduce(C, int(channel_mult * C))
+    elif stride == -1:
+        return nn.Sequential(UpSample(), nn.Conv2d(C, int(C / channel_mult), 1,
+                                                   padding='same'))
+
+
+class SE_Block(nn.Module):
+    "credits: https://github.com/moskomule/senet.pytorch/blob/master/senet/se_module.py#L4"
+
+    def __init__(self, c, r=16):
+        super().__init__()
+        self.squeeze = nn.AdaptiveAvgPool2d(1)
+        self.excitation = nn.Sequential(nn.Linear(c, c // r,
+                                                  bias=False), nn.ReLU(inplace=True),
+                                        nn.Linear(c // r, c, bias=False), nn.Sigmoid())
+
+    def forward(self, x):
+        bs, c, _, _ = x.shape
+        y = self.squeeze(x).view(bs, c)
+        y = self.excitation(y).view(bs, c, 1, 1)
+        return x * y.expand_as(x)
 
 
 class EncResCell(nn.Module):
@@ -27,35 +73,53 @@ class EncResCell(nn.Module):
         super().__init__()
         self.channels_in = channels_in
         self.layers = nn.ModuleList([
-            nn.Conv2d(channels_in, channels_in, 3, padding='same'),
+            # nn.BatchNorm2d(channels_in),
             nn.SiLU(),
             nn.Conv2d(channels_in, channels_in, 3, padding='same'),
+            # nn.BatchNorm2d(channels_in),
+            nn.SiLU(),
+            nn.Conv2d(channels_in, channels_in, 3, padding='same'),
+            #SE_Block(channels_in),
         ])
 
     def forward(self, x):
         out = x
         for layer in self.layers:
             out = layer(out)
+
         out = x + 0.1 * out
         return out
 
 
 class DecResCell(nn.Module):
-    def __init__(self, channels_in, mult=4):
+    def __init__(self, channels, mult, use_se):
         super().__init__()
-        self.channels_in = channels_in
+
+        self.channels = channels
+
         self.layers = nn.ModuleList([
-            nn.Conv2d(channels_in, channels_in, 1, padding='same'),
+            #nn.BatchNorm2d(channels),
+            nn.Conv2d(channels, channels, 1, padding='same'),
+            #nn.BatchNorm2d(channels),
             nn.SiLU(),
-            nn.Conv2d(channels_in, mult * channels_in, 5, groups=channels_in, padding='same'),
+            nn.Conv2d(channels, mult * channels, 5, groups=channels, padding='same'),
+            #nn.BatchNorm2d(mult * channels),
             nn.SiLU(),
-            nn.Conv2d(mult * channels_in, channels_in, 1, padding='same'),
+            nn.Conv2d(mult * channels, channels, 1, padding='same'),
         ])
+
+        self.use_se = use_se
+        if self.use_se:
+            self.se = SE_Block(channels)
 
     def forward(self, x):
         out = x
         for layer in self.layers:
             out = layer(out)
+
+        if self.use_se:
+            out = self.se(out)
+
         out = x + 0.1 * out
         return out
 
@@ -67,86 +131,103 @@ class MnistVAE(nn.Module):
         self.num_logistic = num_logistic
 
         self.tied_log_sig_z = nn.Parameter(torch.tensor([0.], requires_grad=True))
-        self.tied_log_sig_x_hat = nn.Parameter(torch.zeros((28, 28), requires_grad=True))
 
         self.enc_transform = transforms.Resize((64, 64))
 
+        activ = nn.SiLU
+
         self.enc_layers = nn.ModuleList([
             nn.Conv2d(1, 8, 5, stride=2),
-            nn.ELU(),
+            activ(),
             EncResCell(8),
-            nn.ELU(),
-            EncResCell(8),
-            nn.ELU(),
+            activ(),
             nn.Conv2d(8, 16, 5, stride=2),
-            nn.ELU(),
+            activ(),
             EncResCell(16),
-            nn.ELU(),
+            activ(),
             EncResCell(16),
-            nn.ELU(),
+            activ(),
             nn.Conv2d(16, 32, 5, stride=2),
-            nn.ELU(),
+            activ(),
             EncResCell(32),
-            nn.ELU(),
+            activ(),
             EncResCell(32),
-            nn.ELU(),
+            activ(),
+            EncResCell(32),
+            activ(),
             nn.Conv2d(32, 64, 5, padding='same'),
-            nn.ELU(),
+            activ(),
             EncResCell(64),
-            nn.ELU(),
+            activ(),
             EncResCell(64),
-            nn.ELU(),
+            activ(),
+            EncResCell(64),
+            activ(),
+            EncResCell(64),
+            activ(),
             nn.Conv2d(64, 128, 5, padding='same'),
-            nn.ELU(),
+            activ(),
             EncResCell(128),
-            nn.ELU(),
+            activ(),
             EncResCell(128),
-            nn.ELU(),
+            activ(),
+            EncResCell(128),
+            activ(),
+            EncResCell(128),
+            activ(),
         ])
-        self.linear_mu = nn.Linear(3200, 600)
+        self.linear_mu = nn.Linear(3200, 300)
 
-        self.latent_shape = (600, )
+        self.latent_shape = (300, )
 
         self.dec_layers = nn.ModuleList([
-            nn.Linear(600, 1600),
+            nn.Linear(300, 1600),
             nn.Unflatten(-1, (64, 5, 5)),
+            activ(),
+            DecResCell(64, 4, True),
+            activ(),
+            DecResCell(64, 4, True),
+            activ(),
+            DecResCell(64, 4, True),
+            activ(),
+            DecResCell(64, 4, True),
+            activ(),
             nn.ConvTranspose2d(64, 128, 5, stride=2),
-            nn.ELU(),
-            nn.ConvTranspose2d(128, 256, 5, stride=2, output_padding=1, padding=1),
-            nn.ELU(),
-            DecResCell(256),
-            nn.ELU(),
-            DecResCell(256),
-            nn.ELU(),
-            DecResCell(256),
-            nn.ELU(),
-            nn.Conv2d(256, 128, 3, padding='same'),
-            nn.ELU(),
-            DecResCell(128),
-            nn.ELU(),
-            DecResCell(128),
-            nn.ELU(),
-            DecResCell(128),
-            nn.ELU(),
-            nn.Conv2d(128, 64, 3, padding='same'),
-            nn.ELU(),
-            DecResCell(64),
-            nn.ELU(),
-            DecResCell(64),
-            nn.ELU(),
-            DecResCell(64),
-            nn.ELU(),
-            nn.Conv2d(64, 3 * self.num_logistic, 3, padding='same'),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            nn.ConvTranspose2d(128, 128, 5, stride=2, output_padding=1, padding=1),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            DecResCell(128, 4, False),
+            activ(),
+            nn.Conv2d(128, 3 * self.num_logistic, 3, padding='same'),
         ])
 
     def encode(self, x):
         # Encode to a random code
-        x = input_transform(x)
         mu_z = self._encode(x)
-        # sig_z = torch.exp(self.tied_log_sig_z) + SIG_EPSILON
-        # pz = dist.normal.Normal(mu_z, sig_z)
-        # pz = dist.independent.Independent(pz, 1)
-        # z = pz.rsample()
+        sig_z = torch.exp(self.tied_log_sig_z) + SIG_EPSILON
+        pz = dist.normal.Normal(mu_z, sig_z)
+        pz = dist.independent.Independent(pz, 1)
+        z = pz.rsample()
         return mu_z
 
     def decode(self, z):
@@ -276,12 +357,13 @@ def train(beta=1.,
 
     optimizer = optim.Adam(vae.parameters(), weight_decay=1e-5)
 
-    early_stopping = EarlyStopping(vae.state_dict(), save_path)
+    early_stopping = EarlyStopping(vae.state_dict(), save_path, patience=50)
 
     step = 0
 
     for epoch in range(max_epochs):
         print(f'Epoch {epoch}')
+        vae.train()
         for data, _ in tqdm(train_loader):
             optimizer.zero_grad()
             data = data.cuda()
@@ -303,7 +385,8 @@ def train(beta=1.,
             loss = loss.mean()
             loss.backward()
             nn.utils.clip_grad_value_(vae.parameters(), CLIP_GRAD_VALUE)
-            # max_grad = torch.tensor([a.grad.max() for a in vae.parameters()]).max()
+            # max_grad = torch.tensor([a.grad.max() for a in vae.parameters()
+            #                          if a is not None]).max()
             # writer.add_scalar('train/max_grad', max_grad, step)
 
             optimizer.step()
@@ -313,6 +396,7 @@ def train(beta=1.,
             x_hat = vae.sample(3)
         writer.add_images('samples', x_hat, step)
 
+        vae.eval()
         for data, _ in tqdm(val_loader):
             val_loss = []
             with torch.no_grad():
