@@ -1,4 +1,29 @@
+import torch
 from torchvision import datasets, transforms
+
+
+class Binarize(object):
+    """ This class introduces a binarization transformation
+    """
+    def __call__(self, pic):
+        return torch.Tensor(pic.size()).bernoulli_(pic)
+
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
+
+
+def _mnist_transforms():
+    return transforms.Compose([
+        transforms.ToTensor(),
+        Binarize(),
+    ])
+
+
+def _fmnist_transforms():
+    return transforms.Compose([
+        transforms.ToTensor(),
+        Binarize(),
+    ])
 
 
 def load_datasets(dataset, data_root='./datasets'):
@@ -6,20 +31,20 @@ def load_datasets(dataset, data_root='./datasets'):
         train_ds = datasets.MNIST(root=data_root,
                                   train=True,
                                   download=True,
-                                  transform=transforms.ToTensor())
+                                  transform=_mnist_transforms())
         test_ds = datasets.MNIST(root=data_root,
                                  train=False,
                                  download=True,
-                                 transform=transforms.ToTensor())
+                                 transform=_mnist_transforms())
     elif dataset == 'fmnist':
         train_ds = datasets.FashionMNIST(root=data_root,
                                          train=True,
                                          download=True,
-                                         transform=transforms.ToTensor())
+                                         transform=_fmnist_transforms())
         test_ds = datasets.FashionMNIST(root=data_root,
                                         train=False,
                                         download=True,
-                                        transform=transforms.ToTensor())
+                                        transform=_fmnist_transforms())
     elif dataset == 'cifar10':
         train_ds = datasets.CIFAR10(root=data_root,
                                     train=True,

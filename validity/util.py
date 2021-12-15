@@ -19,11 +19,17 @@ class np_loader:
 
 
 class EarlyStopping:
-    def __init__(self, vars_to_save=None, save_path=None, patience=20, threshold=0.005):
+    def __init__(self,
+                 vars_to_save=None,
+                 save_path=None,
+                 patience=20,
+                 threshold=0.005,
+                 verbose=True):
         self.save_path = save_path
         self.vars_to_save = vars_to_save
         self.patience = patience
         self.threshold = threshold
+        self.verbose = verbose
 
         self.best_loss = None
         self.best_step = None
@@ -44,7 +50,8 @@ class EarlyStopping:
         adj_loss = loss + self.loss_offset
         adj_best_loss = self.best_loss + self.loss_offset
         if adj_loss < adj_best_loss * (1 - self.threshold):
-            print(f'New best loss: {loss:0.3f}')
+            if self.verbose:
+                print(f'New best loss: {loss:0.3f}')
             self.best_loss = loss
             if loss < 0.:
                 self.loss_offset = 1. - loss

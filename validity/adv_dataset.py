@@ -72,7 +72,8 @@ def construct_dataset(dataset, attack, net_type, weights_location, data_root='./
         adv_noise = 0.02
     elif attack == 'cwl2':
         if dataset == 'mnist':
-            confidence = 17.198
+            confidence = 0.
+            # confidence = 17.198
         elif dataset == 'cifar10':
             confidence = 7.439  # Average logit marginal in training set
 

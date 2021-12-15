@@ -191,7 +191,7 @@ def train_multiple_odin(in_dataset,
     plt.xlabel('FPR')
     plt.ylabel('TPR')
     plt.legend()
-    plt.savefig('odin/ood_results.png')
+    plt.savefig('ood/odin_results.png')
 
     save_path = pathlib.Path('ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_best.pt')
     save_path.parent.mkdir(parents=True, exist_ok=True)

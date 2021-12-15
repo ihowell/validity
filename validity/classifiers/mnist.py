@@ -11,6 +11,9 @@ from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 from torchvision import transforms, datasets
 
+from validity.util import EarlyStopping
+from validity.datasets import load_datasets
+
 
 class MnistClassifier(nn.Module):
     def __init__(self):
@@ -87,34 +90,45 @@ def test():
     print(y.size())
 
 
-def train_network(num_epochs=10, data_root='./datasets/', cuda_idx=0):
+def train_network(max_epochs=1000, data_root='./datasets/', cuda_idx=0, batch_size=64):
     net = MnistClassifier()
     net = net.cuda()
-    in_train_loader = torch.utils.data.DataLoader(datasets.MNIST(
-        root=data_root, train=True, download=True, transform=transforms.ToTensor()),
-                                                  batch_size=64,
-                                                  shuffle=True)
+    train_set, test_set = load_datasets('mnist')
+    train_set, val_set = torch.utils.data.random_split(train_set, [50000, 10000])
+
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    val_loader = torch.utils.data.DataLoader(val_set, batch_size=batch_size, shuffle=True)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, shuffle=True)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(net.parameters())
 
-    for epoch in range(num_epochs):
-        for data, labels in tqdm(in_train_loader):
+    early_stopping = EarlyStopping(net.state_dict(), 'classifiers/mnist.pth')
+
+    for epoch in range(max_epochs):
+        print(f'Epoch {epoch}')
+        for data, labels in tqdm(train_loader):
             optimizer.zero_grad()
             outputs = net(data.cuda())
             loss = criterion(outputs, labels.cuda())
             loss.backward()
             optimizer.step()
 
-    in_test_loader = torch.utils.data.DataLoader(datasets.MNIST(
-        root=data_root, train=False, download=True, transform=transforms.ToTensor()),
-                                                 batch_size=64,
-                                                 shuffle=False)
+        losses = []
+        with torch.no_grad():
+            for data, labels in tqdm(val_loader):
+                outputs = net(data.cuda())
+                loss = criterion(outputs, labels.cuda())
+                losses.append(loss)
+
+        loss = torch.mean(torch.tensor(loss))
+        if early_stopping(loss):
+            break
 
     losses = []
     correct = 0.
     total = 0.
     with torch.no_grad():
-        for data, labels in in_test_loader:
+        for data, labels in test_loader:
             outputs = net(data.cuda())
             loss = criterion(outputs, labels.cuda())
             losses.append(loss)
@@ -123,8 +137,6 @@ def train_network(num_epochs=10, data_root='./datasets/', cuda_idx=0):
             correct += (predicted == labels.cuda()).sum().item()
 
     print(f'Accuracy {correct / total}')
-
-    torch.save(net.state_dict(), 'classifiers/mnist.pth')
 
 
 def eval_network(weights_path, data_root='./', cuda_idx=0):

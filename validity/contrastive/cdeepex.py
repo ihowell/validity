@@ -1,3 +1,5 @@
+# Follows nocedal2004numerical, page 515 for the implementation of the
+# augmented lagrangian method
 import inspect
 import time
 import sys
@@ -19,73 +21,119 @@ from tensorboardX import SummaryWriter
 
 from validity.classifiers import MnistClassifier, ResNet34
 from validity.datasets import load_datasets
-from validity.generators.mnist_vae import MnistVAE
+from validity.generators.bern_vae import BernVAE
 from validity.generators.nvae.model import load_nvae
+from validity.util import EarlyStopping
 
 
-def xgems(encode,
-          decode,
-          classifier,
-          x_start,
-          y_target,
-          class_coef,
-          writer,
-          tb_writer=None,
-          strategy=None,
-          seed=None,
-          **kwargs):
+def cdeepex(encode,
+            decode,
+            classifier,
+            x_start,
+            y_probe,
+            num_classes,
+            writer,
+            inner_iters=100,
+            outer_iters=10000,
+            tb_writer=None,
+            strategy=None,
+            seed=None,
+            **kwargs):
     """Performs activation maximization using the generator as an
     approximation of the data manifold.
 
     Args:
-        x_start (tf.Tensor): (1HWC)
+        x_start (tf.Tensor): (1CHW)
         y_target (tf.Tensor): ()
 
     """
     x_start = x_start.cuda()
-    class_coef = torch.tensor(class_coef).cuda()
-    zs_init = encode(x_start)
-    if type(zs_init) is list:
-        zs = [z.detach().clone().requires_grad_(True) for z in zs_init]
-    else:
-        zs = zs_init.detach().clone().requires_grad_(True)
-    x_reencode_start, initial_log_p = decode(zs)
-    initial_log_p = initial_log_p.clone().detach()
-    criterion = nn.CrossEntropyLoss()
-    y_start = torch.argmax(classifier(x_reencode_start), 1)[0]
+    y_true = classifier(x_start).argmax(-1)
+    y_probe = y_probe.cuda()
+    z_0 = encode(x_start).clone().detach()
+    z = z_0.clone().detach().requires_grad_()
+    del_z_0 = (x_start - decode(z_0)[0]).clone().detach()
+    c = 1.
+    lam = torch.tensor([1.]).cuda()
+    mu_1 = torch.tensor([1.]).cuda()
+    mu_2 = torch.tensor([1.]).cuda()
+    beta = 1.01
+    gamma = 0.24
+    del_x_threshold = 1e-2
+    del_x_patience = 20
 
-    optim_lr = 1e-2
-    if type(zs) is list:
-        optimizer = optim.Adam(zs[0:1], lr=optim_lr)
-    else:
-        optimizer = optim.Adam([zs], lr=optim_lr)
+    y_prime_idx = torch.tensor([i for i in range(num_classes)
+                                if i not in [y_true, y_probe]]).cuda()
 
-    for step in range(2000):
-        optimizer.zero_grad()
-        x, log_p = decode(zs)
-        logits = classifier(x)
-        decode_loss = torch.mean((x_start - x)**2, (1, 2, 3))
-        class_loss = criterion(logits, y_target.cuda())
-        # loss = class_loss
-        loss = decode_loss + class_coef * class_loss
-        # loss = class_loss + 1e-4 * torch.relu(initial_log_p - log_p)
-        writer.add_scalar('xgem/log_p', log_p, step)
-        writer.add_scalar('xgem/loss', loss, step)
-        writer.add_scalar('xgem/class loss', class_loss, step)
-        writer.add_scalar('xgem/decode loss', decode_loss, step)
-        writer.add_scalar('xgem/classification', torch.argmax(logits, dim=1)[0], step)
-        sorted_logits = logits.sort(dim=1)[0]
-        marginal = sorted_logits[:, -1] - sorted_logits[:, -2]
-        writer.add_scalar('xgem/marginal', marginal[0], step)
-        x_diff = (x_start - x) / 2 + 0.5
-        img = torch.cat([x_start, x, x_diff], 3)[0]
-        writer.add_image('xgem/xgem', torch.tensor(img), step)
-        loss.backward()
-        optimizer.step()
+    # def loss_c(z, lam, mu_1, mu_2, c):
 
-    # z = am(loss_fn, z, tb_writer=tb_writer, prefix=prefix, **kwargs)
+    #     return l
 
-    return x_reencode_start, decode(zs)
+    def h(z, y_1, y_2):
+        img = decode(z)[0] + del_z_0
+        logits = classifier(img)
+        return (logits.index_select(1, y_1) - logits.index_select(1, y_2)).squeeze(-1)
+
+    steps_under_threshold = 0
+    for i in range(outer_iters):
+        old_z = z.clone().detach()
+        early_stopping = EarlyStopping(patience=10, verbose=False)
+        optimizer = optim.Adam([z], weight_decay=1e-5)
+        for j in range(inner_iters):
+            optimizer.zero_grad()
+
+            # loss = loss_c(z, lam, mu_1, mu_2, c)
+            obj = (z - z_0).norm(dim=-1)
+            probe = lam * h(z, y_true, y_probe) + c / 2 * h(z, y_true, y_probe).norm(dim=-1)
+
+            vals = mu_1 + c * h(z, y_true, y_prime_idx)
+            constraint_1 = 1 / (2 * c) * (torch.maximum(torch.zeros_like(vals).cuda(),
+                                                        vals).square() - mu_1.square()).sum()
+            vals = mu_2 + c * h(z, y_probe, y_prime_idx)
+            constraint_2 = 1 / (2 * c) * (torch.maximum(torch.zeros_like(vals).cuda(),
+                                                        vals).square() - mu_2.square()).sum()
+
+            loss = obj + probe + constraint_1 + constraint_2
+
+            loss.backward()
+            optimizer.step()
+            if early_stopping(loss.mean()):
+                break
+
+        lam = (lam + c * h(z, y_true, y_probe)).detach()
+        vals = mu_1 + c * h(z, y_true, y_prime_idx)
+        mu_1 = torch.maximum(torch.zeros_like(vals).cuda(), vals).detach()
+        vals = mu_2 + c * h(z, y_probe, y_prime_idx)
+        mu_2 = torch.maximum(torch.zeros_like(vals).cuda(), vals).detach()
+
+        del_x = decode(z)[0] - decode(old_z)[0]
+        del_x_norm = del_x.norm()
+
+        if h(z, y_true, y_probe) > gamma * h(old_z, y_true, y_probe):
+            c = c * beta
+
+        writer.add_scalar('cdeepex/loss', loss, i)
+        writer.add_scalar('cdeepex/obj', obj, i)
+        writer.add_scalar('cdeepex/probe', probe, i)
+        writer.add_scalar('cdeepex/constraint_1', constraint_1, i)
+        writer.add_scalar('cdeepex/constraint_2', constraint_2, i)
+        writer.add_scalar('cdeepex/lam', lam.mean(), i)
+        writer.add_scalar('cdeepex/mu_1', mu_1.mean(), i)
+        writer.add_scalar('cdeepex/mu_2', mu_2.mean(), i)
+        writer.add_scalar('cdeepex/penalty', c, i)
+        writer.add_scalar('cdeepex/del x', del_x_norm, i)
+
+        img = torch.cat([decode(z_0)[0], decode(z)[0]], 3)[0]
+        writer.add_image('cdeepex/example', torch.tensor(img), i)
+        print(f'Min loss: {loss}')
+        if del_x_norm < del_x_threshold:
+            steps_under_threshold += 1
+            if steps_under_threshold >= del_x_patience:
+                break
+        else:
+            steps_under_threshold = 0
+
+    return decode(z_0)[0], decode(z)[0]
 
 
 def run_xgems(dataset,
@@ -103,6 +151,9 @@ def run_xgems(dataset,
     _, test_ds = load_datasets(dataset)
     in_test_loader = torch.utils.data.DataLoader(test_ds, batch_size=1, shuffle=True)
 
+    if dataset == 'mnist':
+        num_classes = 10
+
     if classifier_net_type == 'mnist':
         classifier = MnistClassifier()
         classifier.load_state_dict(torch.load(classifier_weights_path, map_location=f'cuda:0'))
@@ -116,7 +167,7 @@ def run_xgems(dataset,
     classifier.eval()
 
     if generator_net_type == 'mnist':
-        generator = MnistVAE()
+        generator = BernVAE()
         generator.load_state_dict(torch.load(generator_weights_path))
 
         def encode(x):
@@ -124,8 +175,9 @@ def run_xgems(dataset,
 
         def decode(z):
             x_hat = generator.decode(z)
-            log_p = generator.log_prob(x_hat)
-            return x_hat, log_p
+            # x_hat_binarized = x_hat.bernoulli()
+            # log_p = generator.log_prob(x_hat_binarized)
+            return x_hat, None  # log_p
 
     elif generator_net_type == 'nvae':
         generator = load_nvae(generator_weights_path, batch_size=1)
@@ -151,7 +203,7 @@ def run_xgems(dataset,
     print('target label', target_label)
 
     writer = SummaryWriter()
-    x, x_hat = xgems(encode, decode, classifier, data, target_label, class_coef, writer)
+    x, x_hat = cdeepex(encode, decode, classifier, data, target_label, num_classes, writer)
     # plt.imshow(np.transpose(torch.cat([x, x_hat], 3)[0].cpu().detach().numpy(), (1, 2, 0)))
     # plt.show()
 

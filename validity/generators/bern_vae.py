@@ -9,6 +9,7 @@ from torchvision import transforms, datasets
 
 from tensorboardX import SummaryWriter
 
+from validity.datasets import load_datasets
 from validity.util import EarlyStopping
 from .mixture import discretized_mix_logistic_loss, sample_from_discretized_mix_logistic
 
@@ -22,33 +23,6 @@ LN_2 = torch.log(torch.tensor(2.))
 LOG2T = torch.log2(torch.tensor(1 - 2 * EPSILON))
 
 CHANNEL_MULT = 2
-
-
-class Identity(nn.Module):
-    def __init__(self):
-        super(Identity, self).__init__()
-
-    def forward(self, x):
-        return x
-
-
-class UpSample(nn.Module):
-    def __init__(self):
-        super(UpSample, self).__init__()
-        pass
-
-    def forward(self, x):
-        return F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=True)
-
-
-def get_skip_connection(C, stride, affine, channel_mult):
-    if stride == 1:
-        return Identity()
-    elif stride == 2:
-        return FactorizedReduce(C, int(channel_mult * C))
-    elif stride == -1:
-        return nn.Sequential(UpSample(), nn.Conv2d(C, int(C / channel_mult), 1,
-                                                   padding='same'))
 
 
 class SE_Block(nn.Module):
@@ -124,11 +98,11 @@ class DecResCell(nn.Module):
         return out
 
 
-class MnistVAE(nn.Module):
-    def __init__(self, beta=1., num_logistic=10):
+class BernVAE(nn.Module):
+    def __init__(self, num_latent=100, beta=1.):
         super().__init__()
         self.beta = beta
-        self.num_logistic = num_logistic
+        self.num_latent = num_latent
 
         self.tied_log_sig_z = nn.Parameter(torch.tensor([0.], requires_grad=True))
 
@@ -176,13 +150,23 @@ class MnistVAE(nn.Module):
             EncResCell(128),
             activ(),
         ])
-        self.linear_mu = nn.Linear(3200, 300)
+        self.linear_mu = nn.Linear(3200, num_latent)
 
-        self.latent_shape = (300, )
+        self.latent_shape = (num_latent, )
 
         self.dec_layers = nn.ModuleList([
-            nn.Linear(300, 1600),
-            nn.Unflatten(-1, (64, 5, 5)),
+            nn.Linear(num_latent, 3200),
+            nn.Unflatten(-1, (128, 5, 5)),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            DecResCell(128, 4, True),
+            activ(),
+            nn.ConvTranspose2d(128, 64, 5, stride=2),
             activ(),
             DecResCell(64, 4, True),
             activ(),
@@ -192,33 +176,24 @@ class MnistVAE(nn.Module):
             activ(),
             DecResCell(64, 4, True),
             activ(),
-            nn.ConvTranspose2d(64, 128, 5, stride=2),
+            nn.ConvTranspose2d(64, 32, 5, stride=2, output_padding=1, padding=1),
             activ(),
-            DecResCell(128, 4, True),
+            DecResCell(32, 4, True),
             activ(),
-            DecResCell(128, 4, True),
+            DecResCell(32, 4, True),
             activ(),
-            DecResCell(128, 4, True),
+            DecResCell(32, 4, True),
             activ(),
-            DecResCell(128, 4, True),
+            DecResCell(32, 4, True),
             activ(),
-            nn.ConvTranspose2d(128, 128, 5, stride=2, output_padding=1, padding=1),
+            DecResCell(32, 4, True),
             activ(),
-            DecResCell(128, 4, True),
+            DecResCell(32, 4, True),
             activ(),
-            DecResCell(128, 4, True),
+            DecResCell(32, 4, False),
             activ(),
-            DecResCell(128, 4, True),
-            activ(),
-            DecResCell(128, 4, True),
-            activ(),
-            DecResCell(128, 4, True),
-            activ(),
-            DecResCell(128, 4, True),
-            activ(),
-            DecResCell(128, 4, False),
-            activ(),
-            nn.Conv2d(128, 3 * self.num_logistic, 3, padding='same'),
+            # nn.Conv2d(32, 3 * self.num_logistic, 3, padding='same'),
+            nn.Conv2d(32, 1, 3, padding='same'),
         ])
 
     def encode(self, x):
@@ -232,11 +207,11 @@ class MnistVAE(nn.Module):
 
     def decode(self, z):
         # Decode code to a random sample
-        mu_x_hat = self._decode(z)
-        x_hat = x_hat.view(num_samples, self.num_logistic * 3, -1)
-        x_hat = sample_from_discretized_mix_logistic(x_hat)
-        x_hat = x_hat.view(num_samples, 1, 28, 28)
-        return x_hat
+        x_hat_logits = self._decode(z)
+        # px_hat = dist.bernoulli.Bernoulli(logits=x_hat_logits)
+        # px_hat = dist.independent.Independent(px_hat, 3)
+        # return px_hat.sample()
+        return x_hat_logits.sigmoid()
 
     def _encode(self, x):
         out = x
@@ -265,12 +240,11 @@ class MnistVAE(nn.Module):
         z = pz.rsample()
 
         # decode
-        x_hat = self._decode(z)
-        x_hat = x_hat.view(n, self.num_logistic * 3, -1)
-        posterior_nll = discretized_mix_logistic_loss(x_hat, x.view(n, -1, 1), reduce=False)
-        posterior_nll = posterior_nll.sum([1, 2])
-        x_hat = sample_from_discretized_mix_logistic(x_hat)
-        x_hat = x_hat.view(n, 1, 28, 28)
+        x_hat_logits = self._decode(z)
+        px_hat = dist.bernoulli.Bernoulli(logits=x_hat_logits)
+        px_hat = dist.independent.Independent(px_hat, 3)
+        posterior_nll = -px_hat.log_prob(x)
+        x_hat = px_hat.sample()
 
         # prior z
         mu_p = torch.zeros_like(mu_z).cuda()
@@ -307,9 +281,12 @@ class MnistVAE(nn.Module):
         prior = dist.independent.Independent(prior, 1)
         z = prior.rsample()
 
-        x_hat = self._decode(z)
-        x_hat = x_hat.view(num_samples, self.num_logistic * 3, -1)
-        x_hat = sample_from_discretized_mix_logistic(x_hat)
+        x_hat_logits = self._decode(z)
+        px_hat = dist.bernoulli.Bernoulli(logits=x_hat_logits)
+        px_hat = dist.independent.Independent(px_hat, 3)
+        # x_hat = x_hat.view(num_samples, self.num_logistic * 3, -1)
+        # x_hat = sample_from_discretized_mix_logistic(x_hat)
+        x_hat = px_hat.sample()
         x_hat = x_hat.view(num_samples, 1, 28, 28)
         return x_hat
 
@@ -331,26 +308,24 @@ class MnistVAE(nn.Module):
 
 
 def train(beta=1.,
+          num_latent=100,
           max_epochs=1000,
           batch_size=64,
           data_root='./datasets/',
           cuda_idx=0,
           mutation_rate=None):
     beta = float(beta)
-    vae = MnistVAE(beta=beta)
+    vae = MnistVAE(num_latent, beta=beta)
     vae = vae.cuda()
 
-    dataset = datasets.MNIST(root=data_root,
-                             train=True,
-                             download=True,
-                             transform=transforms.ToTensor())
-    train_set, val_set = torch.utils.data.random_split(dataset, [50000, 10000])
+    train_set, _ = load_datasets('mnist')
+    train_set, val_set = torch.utils.data.random_split(train_set, [50000, 10000])
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
     val_loader = torch.utils.data.DataLoader(val_set, batch_size=batch_size, shuffle=True)
 
-    save_name = f'mnist_{beta}'
+    save_name = f'mnist_bern_{num_latent}_{beta}'
     if mutation_rate:
-        save_name = f'mnist_background_{beta}_{mutation_rate}'
+        save_name = f'mnist_bern_background_{num_latent}_{beta}_{mutation_rate}'
 
     writer = SummaryWriter('vae/' + save_name)
     save_path = f'vae/{save_name}.pt'
@@ -385,9 +360,9 @@ def train(beta=1.,
             loss = loss.mean()
             loss.backward()
             nn.utils.clip_grad_value_(vae.parameters(), CLIP_GRAD_VALUE)
-            # max_grad = torch.tensor([a.grad.max() for a in vae.parameters()
-            #                          if a is not None]).max()
-            # writer.add_scalar('train/max_grad', max_grad, step)
+            max_grad = torch.tensor([a.grad.max() for a in vae.parameters()
+                                     if a is not None]).max()
+            writer.add_scalar('train/max_grad', max_grad, step)
 
             optimizer.step()
             step += 1

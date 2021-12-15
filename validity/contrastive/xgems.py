@@ -19,78 +19,29 @@ from tensorboardX import SummaryWriter
 
 from validity.classifiers import MnistClassifier, ResNet34
 from validity.datasets import load_datasets
-from validity.generators.mnist_vae import MnistVAE
+from validity.generators.bern_vae import BernVAE
 from validity.generators.nvae.model import load_nvae
-from validity.util import EarlyStopping
 
 
-def cdeepex(encode,
-            decode,
-            classifier,
-            x_start,
-            y_probe,
-            writer,
-            inner_iters=100,
-            outer_iters=100,
-            tb_writer=None,
-            strategy=None,
-            seed=None,
-            **kwargs):
+def xgems(encode,
+          decode,
+          classifier,
+          x_start,
+          y_target,
+          class_coef,
+          writer,
+          tb_writer=None,
+          strategy=None,
+          seed=None,
+          **kwargs):
     """Performs activation maximization using the generator as an
     approximation of the data manifold.
 
     Args:
-        x_start (tf.Tensor): (1CHW)
+        x_start (tf.Tensor): (1HWC)
         y_target (tf.Tensor): ()
 
     """
-    x_start = x_start.cuda()
-    y_true = classifier(x_start).argmax(-1)
-    z_0 = encode(x_start)
-    z = z_0.clone().detach()
-    del_z_0 = x_start - decode(z_0)
-    c = 1.
-    beta = 1.01
-    gamma = 0.24
-    old_z = None
-
-    y_prime_idx = torch.tensor([i for i in range(num_classes) if i not in [y_true, y_probe]])
-
-    def loss_c(z, lam, mu_1, mu_2, c):
-        l = (z - z_0).norm(dim=-1)
-        l += lam * h(z, y_true, y_probe)
-        l += c / 2 * h(z, y_true, y_probe).norm(dim=-1)
-
-        l += 1 / (2 * c) * (torch.max(0,
-                                      mu_1.square() + h(z, y_true, y_prime_idx)).square() -
-                            mu_1.square()).sum()
-        l += 1 / (2 * c) * (torch.max(0,
-                                      mu_1.square() + h(z, y_probe, y_prime_idx)).square() -
-                            mu_1.square()).sum()
-        return loss
-
-    def h(z, y_1, y_2):
-        img = decode(z) + del_z_0
-        logits = classifier(img)
-        return logits.index_select(y_1) - logits.index_select(y_2)
-
-    for i in range(outer_iters):
-        lam = 1.
-        mu_1 = 1.
-        mu_2 = 1.
-
-        early_stopping = EarlyStopping()
-        optim = optim.Adam(z, weight_decay=1e-5)
-        for i in range(inner_iters):
-            loss = loss_c(z, lam, mu_1, mu_2, c)
-            loss.backward()
-            optimizer.step()
-            if early_stopping(loss):
-                break
-
-        if old_z is not None and h(z, y_true, y_probe) > gamma * h(old_z, y_true, y_probe):
-            c = c * beta
-
     x_start = x_start.cuda()
     class_coef = torch.tensor(class_coef).cuda()
     zs_init = encode(x_start)
@@ -104,10 +55,11 @@ def cdeepex(encode,
     y_start = torch.argmax(classifier(x_reencode_start), 1)[0]
 
     optim_lr = 1e-2
+    weight_decay = 1e-5
     if type(zs) is list:
-        optimizer = optim.Adam(zs[0:1], lr=optim_lr)
+        optimizer = optim.Adam(zs[0:1], lr=optim_lr, weight_decay=weight_decay)
     else:
-        optimizer = optim.Adam([zs], lr=optim_lr)
+        optimizer = optim.Adam([zs], lr=optim_lr, weight_decay=weight_decay)
 
     for step in range(2000):
         optimizer.zero_grad()
@@ -123,13 +75,18 @@ def cdeepex(encode,
         writer.add_scalar('xgem/class loss', class_loss, step)
         writer.add_scalar('xgem/decode loss', decode_loss, step)
         writer.add_scalar('xgem/classification', torch.argmax(logits, dim=1)[0], step)
+
         sorted_logits = logits.sort(dim=1)[0]
         marginal = sorted_logits[:, -1] - sorted_logits[:, -2]
         writer.add_scalar('xgem/marginal', marginal[0], step)
+
         x_diff = (x_start - x) / 2 + 0.5
-        img = torch.cat([x_start, x, x_diff], 3)[0]
+        img = torch.cat([x_start, x.bernoulli(), x_diff], 3)[0]
         writer.add_image('xgem/xgem', torch.tensor(img), step)
+
         loss.backward()
+        writer.add_scalar('xgem/zs grad max', zs.grad.max(), step)
+        nn.utils.clip_grad_value_(zs, 1e-1)
         optimizer.step()
 
     # z = am(loss_fn, z, tb_writer=tb_writer, prefix=prefix, **kwargs)
@@ -142,7 +99,7 @@ def run_xgems(dataset,
               classifier_weights_path,
               generator_net_type,
               generator_weights_path,
-              class_coef=1.0,
+              class_coef=5.0,
               data_root='./datasets/',
               cuda_idx=0,
               seed=1):
@@ -164,8 +121,8 @@ def run_xgems(dataset,
     classifier = classifier.cuda()
     classifier.eval()
 
-    if generator_net_type == 'mnist':
-        generator = MnistVAE()
+    if generator_net_type in ['mnist', 'fmnist']:
+        generator = BernVAE()
         generator.load_state_dict(torch.load(generator_weights_path))
 
         def encode(x):
@@ -173,7 +130,8 @@ def run_xgems(dataset,
 
         def decode(z):
             x_hat = generator.decode(z)
-            log_p = generator.log_prob(x_hat)
+            x_hat_binarized = x_hat.bernoulli()
+            log_p = generator.log_prob(x_hat_binarized)
             return x_hat, log_p
 
     elif generator_net_type == 'nvae':
