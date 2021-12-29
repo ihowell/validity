@@ -12,14 +12,7 @@ class Binarize(object):
         return self.__class__.__name__ + '()'
 
 
-def _mnist_transforms():
-    return transforms.Compose([
-        transforms.ToTensor(),
-        Binarize(),
-    ])
-
-
-def _fmnist_transforms():
+def _bin_transforms():
     return transforms.Compose([
         transforms.ToTensor(),
         Binarize(),
@@ -31,20 +24,38 @@ def load_datasets(dataset, data_root='./datasets'):
         train_ds = datasets.MNIST(root=data_root,
                                   train=True,
                                   download=True,
-                                  transform=_mnist_transforms())
+                                  transform=transforms.ToTensor())
         test_ds = datasets.MNIST(root=data_root,
                                  train=False,
                                  download=True,
-                                 transform=_mnist_transforms())
+                                 transform=transforms.ToTensor())
     elif dataset == 'fmnist':
         train_ds = datasets.FashionMNIST(root=data_root,
                                          train=True,
                                          download=True,
-                                         transform=_fmnist_transforms())
+                                         transform=transforms.ToTensor())
         test_ds = datasets.FashionMNIST(root=data_root,
                                         train=False,
                                         download=True,
-                                        transform=_fmnist_transforms())
+                                        transform=transforms.ToTensor())
+    elif dataset == 'mnist_bin':
+        train_ds = datasets.MNIST(root=data_root,
+                                  train=True,
+                                  download=True,
+                                  transform=_bin_transforms())
+        test_ds = datasets.MNIST(root=data_root,
+                                 train=False,
+                                 download=True,
+                                 transform=_bin_transforms())
+    elif dataset == 'fmnist_bin':
+        train_ds = datasets.FashionMNIST(root=data_root,
+                                         train=True,
+                                         download=True,
+                                         transform=_bin_transforms())
+        test_ds = datasets.FashionMNIST(root=data_root,
+                                        train=False,
+                                        download=True,
+                                        transform=_bin_transforms())
     elif dataset == 'cifar10':
         train_ds = datasets.CIFAR10(root=data_root,
                                     train=True,

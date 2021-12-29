@@ -1,5 +1,14 @@
-import torch
+import configparser
+
 import numpy as np
+import submitit
+import torch
+
+
+def loop_gen(gen):
+    while True:
+        for x in gen:
+            yield x
 
 
 class np_loader:
@@ -36,6 +45,12 @@ class EarlyStopping:
         self.loss_offset = 0.  # For if loss becomes negative
         self.step = 0
 
+    def reset(self):
+        self.best_loss = None
+        self.best_step = None
+        self.loss_offset = 0
+        self.step = 0
+
     def __call__(self, loss):
         # Returns true if should stop
         if self.best_loss is None:
@@ -61,3 +76,27 @@ class EarlyStopping:
             return False
 
         return self.step - self.best_step >= self.patience
+
+
+class NPZDataset(torch.utils.data.Dataset):
+    def __init__(self, path, transform=None, target_transform=None):
+        self.path = path
+        self.transform = transform
+        self.target_transform = target_transform
+
+        _file = np.load(self.path)
+        self._data = _file['arr_0']
+        print(self._data.shape)
+        self._labels = _file['arr_1']
+
+    def __len__(self):
+        return self._data.shape[0]
+
+    def __getitem__(self, idx):
+        data = self._data[idx]
+        label = self._labels[idx]
+        if self.transform:
+            data = self.transform(data)
+        if self.target_transform:
+            label = self.target_transform(data)
+        return data, label

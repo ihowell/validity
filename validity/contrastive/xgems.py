@@ -17,20 +17,18 @@ import numpy as np
 from torchvision import datasets, transforms
 from tensorboardX import SummaryWriter
 
-from validity.classifiers import MnistClassifier, ResNet34
+from validity.classifiers import load_cls
 from validity.datasets import load_datasets
-from validity.generators.bern_vae import BernVAE
-from validity.generators.nvae.model import load_nvae
+from validity.generators import load_gen, load_encoded_ds
 
 
-def xgems(encode,
-          decode,
+def xgems(generator,
           classifier,
           x_start,
           y_target,
-          class_coef,
-          writer,
-          tb_writer=None,
+          z_start=None,
+          class_coef=1.0,
+          writer=None,
           strategy=None,
           seed=None,
           **kwargs):
@@ -43,55 +41,64 @@ def xgems(encode,
 
     """
     x_start = x_start.cuda()
+    if z_start:
+        if type(zs_init) is list:
+            zs_init = [z.cuda() for z in z_start]
+        else:
+            zs_init = z_start.cuda()
+    else:
+        zs_init = generator.encode(x_start)
+
     class_coef = torch.tensor(class_coef).cuda()
-    zs_init = encode(x_start)
+
     if type(zs_init) is list:
         zs = [z.detach().clone().requires_grad_(True) for z in zs_init]
     else:
         zs = zs_init.detach().clone().requires_grad_(True)
-    x_reencode_start, initial_log_p = decode(zs)
-    initial_log_p = initial_log_p.clone().detach()
+    x_reencode_start = generator.decode(zs)
+    #initial_log_p = initial_log_p.clone().detach()
     criterion = nn.CrossEntropyLoss()
-    y_start = torch.argmax(classifier(x_reencode_start), 1)[0]
+    y_start = torch.argmax(classifier(x_reencode_start), 1)
 
     optim_lr = 1e-2
     weight_decay = 1e-5
     if type(zs) is list:
         optimizer = optim.Adam(zs[0:1], lr=optim_lr, weight_decay=weight_decay)
     else:
-        optimizer = optim.Adam([zs], lr=optim_lr, weight_decay=weight_decay)
+        optimizer = optim.SGD([zs], lr=optim_lr)  #, weight_decay=weight_decay)
 
     for step in range(2000):
         optimizer.zero_grad()
-        x, log_p = decode(zs)
+        x = generator.decode(zs)
         logits = classifier(x)
         decode_loss = torch.mean((x_start - x)**2, (1, 2, 3))
         class_loss = criterion(logits, y_target.cuda())
         # loss = class_loss
         loss = decode_loss + class_coef * class_loss
+        loss = loss.mean()
         # loss = class_loss + 1e-4 * torch.relu(initial_log_p - log_p)
-        writer.add_scalar('xgem/log_p', log_p, step)
-        writer.add_scalar('xgem/loss', loss, step)
-        writer.add_scalar('xgem/class loss', class_loss, step)
-        writer.add_scalar('xgem/decode loss', decode_loss, step)
-        writer.add_scalar('xgem/classification', torch.argmax(logits, dim=1)[0], step)
+        if writer:
+            # writer.add_scalar('xgem/log_p', log_p, step)
+            writer.add_scalar('xgem/loss', loss.mean(), step)
+            writer.add_scalar('xgem/class loss', class_loss.mean(), step)
+            writer.add_scalar('xgem/decode loss', decode_loss.mean(), step)
+            # writer.add_scalar('xgem/classification', torch.argmax(logits, dim=1)[0], step)
+            writer.add_scalar('xgem/logit orig', logits[0, y_start[0].item()], step)
+            writer.add_scalar('xgem/logit probe', logits[0, y_target[0].item()], step)
 
-        sorted_logits = logits.sort(dim=1)[0]
-        marginal = sorted_logits[:, -1] - sorted_logits[:, -2]
-        writer.add_scalar('xgem/marginal', marginal[0], step)
+            sorted_logits = logits.sort(dim=1)[0]
+            marginal = sorted_logits[:, -1] - sorted_logits[:, -2]
+            writer.add_scalar('xgem/marginal', marginal[0], step)
 
-        x_diff = (x_start - x) / 2 + 0.5
-        img = torch.cat([x_start, x.bernoulli(), x_diff], 3)[0]
-        writer.add_image('xgem/xgem', torch.tensor(img), step)
+            img = torch.cat([x_start, x], 3)
+            writer.add_images('xgem/xgem', torch.tensor(img), step)
 
         loss.backward()
-        writer.add_scalar('xgem/zs grad max', zs.grad.max(), step)
-        nn.utils.clip_grad_value_(zs, 1e-1)
+        if writer:
+            writer.add_scalar('xgem/zs grad max', zs.grad.max(), step)
         optimizer.step()
 
-    # z = am(loss_fn, z, tb_writer=tb_writer, prefix=prefix, **kwargs)
-
-    return x_reencode_start, decode(zs)
+    return generator.decode(zs)
 
 
 def run_xgems(dataset,
@@ -102,112 +109,80 @@ def run_xgems(dataset,
               class_coef=5.0,
               data_root='./datasets/',
               cuda_idx=0,
+              batch_size=1,
               seed=1):
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     _, test_ds = load_datasets(dataset)
-    in_test_loader = torch.utils.data.DataLoader(test_ds, batch_size=1, shuffle=True)
+    loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False)
 
-    if classifier_net_type == 'mnist':
-        classifier = MnistClassifier()
-        classifier.load_state_dict(torch.load(classifier_weights_path, map_location=f'cuda:0'))
-    elif classifier_net_type == 'cifar10':
-        classifier = ResNet34(
-            10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
-        classifier.load_state_dict(
-            torch.load(classifier_weights_path, map_location=f'cuda:{cuda_idx}'))
-
-    classifier = classifier.cuda()
+    classifier = load_cls(classifier_net_type, classifier_weights_path)
     classifier.eval()
 
-    if generator_net_type in ['mnist', 'fmnist']:
-        generator = BernVAE()
-        generator.load_state_dict(torch.load(generator_weights_path))
-
-        def encode(x):
-            return generator.encode(x)
-
-        def decode(z):
-            x_hat = generator.decode(z)
-            x_hat_binarized = x_hat.bernoulli()
-            log_p = generator.log_prob(x_hat_binarized)
-            return x_hat, log_p
-
-    elif generator_net_type == 'nvae':
-        generator = load_nvae(generator_weights_path, batch_size=1)
-
-        def encode(x):
-            z, combiner_cells_s = generator.encode(x)
-            return [z] + combiner_cells_s
-
-        def decode(zs):
-            z, combiner_cells_s = zs[0], zs[1:]
-            logits, log_p = generator.decode(z, combiner_cells_s, 1.)
-            return generator.decoder_output(logits).sample(), log_p
-
-    generator = generator.cuda()
+    generator = load_gen(generator_net_type, generator_weights_path)
     generator.eval()
 
-    for data, label in in_test_loader:
+    for data, label in loader:
         break
-
     target_label = (label + 1) % 10
 
     print('label', label)
     print('target label', target_label)
 
     writer = SummaryWriter()
-    x, x_hat = xgems(encode, decode, classifier, data, target_label, class_coef, writer)
-    # plt.imshow(np.transpose(torch.cat([x, x_hat], 3)[0].cpu().detach().numpy(), (1, 2, 0)))
-    # plt.show()
+    x_hat = xgems(generator,
+                  classifier,
+                  data,
+                  target_label,
+                  class_coef=class_coef,
+                  writer=writer)
 
-    # sample_per_class = {}
-    # for i in range(info.features['label'].num_classes):
-    #     sample_per_class[i] = None
 
-    # for batch in ds_dict['test']:
-    #     for img, label in zip(batch['image'], batch['label']):
-    #         if sample_per_class[label.numpy()] is None:
-    #             sample_per_class[label.numpy()] = img
-    #             if all([x is not None for x in sample_per_class.values()]):
-    #                 done_processing = True
-    #                 break
-    #     if done_processing:
-    #         break
+def make_xgems_dataset(dataset,
+                       classifier_net_type,
+                       classifier_weights_path,
+                       generator_net_type,
+                       generator_weights_path,
+                       class_coef=5.0,
+                       data_root='./datasets/',
+                       cuda_idx=0,
+                       seed=1):
+    torch.backends.cudnn.deterministic = True
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
 
-    # for y_start, x_orig in sample_per_class.items():
-    #     for y_target in sample_per_class:
-    #         x_start = tf.expand_dims(x_orig, 0)
+    batch_size = 1
+    num_labels = 10
 
-    #         x_reencode_start, img = xgems(generator.encode,
-    #                                       generator.decode,
-    #                                       classifier,
-    #                                       x_start,
-    #                                       y_start,
-    #                                       y_target,
-    #                                       class_coef=class_coef,
-    #                                       tb_writer=tb_writer,
-    #                                       strategy=strategy,
-    #                                       seed=seed,
-    #                                       **kwargs)
+    encoded_test_ds = load_encoded_ds(dataset, generator_net_type)
+    _, test_ds = load_datasets(dataset)
 
-    #         tf.print('Original class:', y_start)
-    #         tf.print('Target class:', y_target)
-    #         tf.print('Final class:', tf.argmax(classifier(img)['logits'], axis=1))
+    classifier = load_cls(classifier_net_type, classifier_weights_path)
+    classifier.eval()
 
-    #         img = tf.concat([x_reencode_start, img], axis=2)
-    #         img = tf.cast(img * 255, tf.uint8)
-    #         png_tensor = tf.io.encode_png(img[0])
+    generator = load_gen(generator_net_type, generator_weights_path)
+    generator.eval()
 
-    #         img_path = f'{int(y_start)}_to_{int(y_target)}.png'
-    #         if seed is not None:
-    #             img_path = f'{int(y_start)}_to_{int(y_target)}_seed_{seed}.png'
-    #         img_path = Path(output_dir, 'images', img_path)
-    #         img_path.parent.mkdir(exist_ok=True, parents=True)
-    #         with open(img_path, 'wb') as png:
-    #             png.write(png_tensor.numpy())
+    examples = []
+    example_labels = []
+    for (data, _), (encoded_data, _) in tqdm(zip(test_ds, encoded_test_ds)):
+        print('data', data.shape)
+        print('enc', encoded_data.shape)
+        n = batch.size(0)
+        batch = batch.tile([num_labels, 1, 1, 1])
+        labels = torch.arange(num_labels).reshape((-1, 1)).expand(-1, n).reshape([-1])
+
+        x_hat = xgems(generator, classifier, batch, labels)
+        examples.append(x_hat.cpu().detach().numpy())
+        example_labels.append(labels.numpy())
+
+    examples = np.concatenate(examples)
+    example_labels = np.concatenate(example_labels)
+
+    Path('contrastive').mkdir(exist_ok=True)
+    np.savez(f'data/xgems_{generator_net_type}_{dataset}.npz', examples, example_labels)
 
 
 if __name__ == '__main__':
-    fire.Fire(run_xgems)
+    fire.Fire()

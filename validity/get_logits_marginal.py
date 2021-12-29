@@ -28,13 +28,26 @@ def main(ds_name, net_type, weights_location, data_root='./datasets/', cuda_idx=
     train_ds, _ = load_datasets(ds_name, data_root=data_root)
     loader = torch.utils.data.DataLoader(train_ds, batch_size=64, shuffle=True)
 
+    logit_labels = []
     marginals = []
     for data, labels in tqdm(loader):
+        labels = labels.cuda()
         logits = network(data.cuda())
+        for logit, label in zip(logits, labels):
+            logit_labels.append(logit[label].unsqueeze(0).cpu().detach().numpy())
         logits = logits.sort()[0]
         marginal = logits[:, -1] - logits[:, -2]
         marginals.append(marginal.cpu().detach().numpy())
+
+    logit_labels = np.concatenate(logit_labels)
     marginals = np.concatenate(marginals)
+
+    print('Logit[label]:')
+    print(f'{np.mean(logit_labels)=}')
+    print(f'{np.std(logit_labels)=}')
+    print(f'{np.min(logit_labels)=}')
+    print(f'{np.max(logit_labels)=}')
+
     print('Marginals:')
     print(f'{np.mean(marginals)=}')
     print(f'{np.std(marginals)=}')
