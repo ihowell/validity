@@ -15,7 +15,7 @@ from torchvision import transforms, datasets
 from tensorboardX import SummaryWriter
 
 from validity.datasets import load_datasets
-from validity.util import EarlyStopping, loop_gen
+from validity.util import EarlyStopping, loop_gen, get_executor
 
 
 class WGAN_GP(nn.Module):
@@ -210,13 +210,7 @@ def encode_dataset(dataset,
                    data_root='./datasets/',
                    cuda_idx=0,
                    seed=0):
-    executor = submitit.AutoExecutor(folder='logs')
-    executor.update_parameters(timeout_min=7 * 24 * 60,
-                               gpus_per_node=1,
-                               slurm_partition='gpu',
-                               slurm_gres='gpu',
-                               slurm_mem_per_cpu='32G',
-                               slurm_array_parallelism=100)
+    executor = get_executor()
     jobs = []
     with executor.batch():
         for i in range(shards):
@@ -256,7 +250,6 @@ def _encode_dataset_job(dataset,
     gan.eval()
 
     _, test_set = load_datasets('mnist')
-    test_set = torch.utils.data.Subset(test_set, range(17))
 
     n = len(test_set)
     shard_lower = (n * shard_idx) // shards
@@ -270,9 +263,6 @@ def _encode_dataset_job(dataset,
         z = gan.encode(data.cuda())
         test_data.append(z.cpu().numpy())
         test_labels.append(label.numpy())
-        if len(test_data) >= 2:
-            break
-
     test_data = np.concatenate(test_data)
     test_labels = np.concatenate(test_labels)
     pathlib.Path('data/tmp').mkdir(exist_ok=True, parents=True)

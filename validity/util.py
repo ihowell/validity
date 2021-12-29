@@ -5,6 +5,18 @@ import submitit
 import torch
 
 
+def get_executor():
+    executor = submitit.AutoExecutor(folder='logs')
+    executor.update_parameters(timeout_min=7 * 24 * 60,
+                               gpus_per_node=1,
+                               slurm_partition='gpu',
+                               slurm_gres='gpu',
+                               slurm_mem_per_cpu='32G',
+                               slurm_array_parallelism=100,
+                               slurm_constraint='gpu_v100')
+    return executor
+
+
 def loop_gen(gen):
     while True:
         for x in gen:
@@ -86,7 +98,6 @@ class NPZDataset(torch.utils.data.Dataset):
 
         _file = np.load(self.path)
         self._data = _file['arr_0']
-        print(self._data.shape)
         self._labels = _file['arr_1']
 
     def __len__(self):
@@ -100,3 +111,16 @@ class NPZDataset(torch.utils.data.Dataset):
         if self.target_transform:
             label = self.target_transform(data)
         return data, label
+
+
+class ZipDataset(torch.utils.data.Dataset):
+    def __init__(self, ds1, ds2):
+        assert len(ds1) == len(ds2)
+        self._ds1 = ds1
+        self._ds2 = ds2
+
+    def __len__(self):
+        return len(self._ds1)
+
+    def __getitem__(self, idx):
+        return self._ds1[idx], self._ds2[idx]
