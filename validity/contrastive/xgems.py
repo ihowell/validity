@@ -194,7 +194,6 @@ def _make_xgems_dataset_job(dataset,
     encoded_test_ds = load_encoded_ds(dataset, generator_net_type)
     _, test_ds = load_datasets(dataset)
     zip_ds = ZipDataset(test_ds, encoded_test_ds)
-    zip_ds = torch.utils.data.Subset(zip_ds, range(3))
 
     n = len(zip_ds)
     shard_lower = (n * shard_idx) // shards
