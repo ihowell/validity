@@ -66,6 +66,8 @@ def cdeepex(generator,
     del_x_threshold = 1e-1
     del_x_patience = 300
 
+    print(f'{y_true=}')
+    print(f'{y_probe=}')
     y_prime_idx = torch.tensor([i for i in range(num_classes)
                                 if i not in [y_true, y_probe]]).cuda()
 
