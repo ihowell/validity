@@ -15,6 +15,10 @@ from torch.autograd import Variable
 
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
+from sklearn.preprocessing import StandardScaler
+
+from validity.classifiers import load_cls
+from validity.datasets import load_datasets
 
 
 class ODINDetector:
@@ -25,18 +29,21 @@ class ODINDetector:
         self.temper = temper
 
         self.lr = None
+        self.sc = None
 
     def predict(self, inputs):
         assert self.lr is not None
         score = self.score(inputs)
+        score = self.sc.transform(score)
         return -self.lr.predict(score) + 1.
 
     def predict_proba(self, inputs):
         assert self.lr is not None
         score = self.score(inputs)
+        score = self.sc.transform(score)
         return -self.lr.predict_proba(score) + 1.
 
-    def evaluate(self, in_loader, out_loader):
+    def train(self, in_loader, out_loader):
         self.network.eval()
         score_in = []
         for data, _ in tqdm(in_loader, desc='Test in loader'):
@@ -59,11 +66,14 @@ class ODINDetector:
             [np.ones(test_score_in.shape[0]),
              np.zeros(test_score_out.shape[0])])
 
-        res = {}
+        self.sc = StandardScaler()
+        scaled_scores_val = self.sc.fit_transform(val_scores)
+        scaled_scores_test = self.sc.transform(test_scores)
 
-        self.lr = LogisticRegressionCV(n_jobs=-1).fit(val_scores, val_labels)
-        test_probs = self.lr.predict_proba(test_scores)[:, 1]
-        test_preds = self.lr.predict(test_scores)
+        res = {}
+        self.lr = LogisticRegressionCV(n_jobs=-1).fit(scaled_scores_val, val_labels)
+        test_probs = self.lr.predict_proba(scaled_scores_test)[:, 1]
+        test_preds = self.lr.predict(scaled_scores_test)
 
         fpr, tpr, thresholds = roc_curve(test_labels, test_probs)
         res['plot'] = (fpr, tpr)
@@ -112,20 +122,11 @@ def train_odin(in_dataset,
                cuda_idx=0,
                magnitude=1e-2,
                temperature=1000.):
-    from validity.classifiers.resnet import ResNet34
-    from validity.classifiers.mnist import MnistClassifier
-    from validity.datasets import load_datasets
+
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    if net_type == 'mnist':
-        network = MnistClassifier()
-        network.load_state_dict(torch.load(weights_path, map_location=f'cuda:0'))
-    elif net_type == 'resnet':
-        network = ResNet34(
-            10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
-        network.load_state_dict(torch.load(weights_path, map_location=f'cuda:0'))
-    network = network.cuda()
+    network = load_cls(net_type, weights_path, in_dataset)
 
     odin = ODINDetector(network, magnitude, temperature)
 
@@ -134,7 +135,7 @@ def train_odin(in_dataset,
     _, out_test_ds = load_datasets(out_dataset)
     out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=64, shuffle=True)
 
-    results = odin.evaluate(in_test_loader, out_test_loader)
+    results = odin.train(in_test_loader, out_test_loader)
 
     save_path = pathlib.Path(
         'ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}.pt')
@@ -208,6 +209,31 @@ def train_multiple_odin(in_dataset,
         print(tabulate(result_table))
 
 
+def evaluate_odin(net_type, in_dataset, out_dataset, magnitude, temperature):
+    odin = load_odin(net_type, in_dataset, out_dataset, magnitude, temperature)
+
+    _, in_test_ds = load_datasets(in_dataset)
+    _, out_test_ds = load_datasets(out_dataset)
+
+    in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)
+    out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=64, shuffle=True)
+
+    in_preds = [odin.predict(data) for data, _ in in_test_loader]
+    out_preds = [odin.predict(data) for data, _ in out_test_loader]
+    in_preds = np.concatenate(in_preds)
+    out_preds = np.concatenate(out_preds)
+
+    in_preds = in_preds[1000:]
+    out_preds = out_preds[1000:]
+
+    in_correct = np.where(in_preds == 0., 1., 0.)
+    out_correct = np.where(out_preds == 1., 1., 0.)
+    correct = np.concatenate([in_correct, out_correct])
+
+    acc = correct.mean()
+    print(f'Accuracy: {acc:.4f}')
+
+
 def load_odin(net_type, in_dataset, out_dataset, magnitude, temperature):
     save_path = pathlib.Path(
         'ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}.pt')
@@ -216,7 +242,7 @@ def load_odin(net_type, in_dataset, out_dataset, magnitude, temperature):
 
 
 def load_best_odin(net_type, in_dataset, out_dataset):
-    save_path = pathlib.Path('ood', f'odin_{net_type}_cifar10_svhn_best.pt')
+    save_path = pathlib.Path('ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_best.pt')
     assert save_path.exists(), f'{save_path} does not exist'
     return torch.load(save_path)
 

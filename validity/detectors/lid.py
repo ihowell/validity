@@ -1,4 +1,5 @@
 import pathlib
+import random
 
 import torch
 import torch.nn as nn
@@ -18,26 +19,40 @@ from sklearn.covariance import EmpiricalCovariance
 from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
 from scipy.spatial.distance import cdist
 
+from validity.datasets import load_datasets
+from validity.classifiers import load_cls
+
 
 class LIDDetector:
-    def __init__(self, model=None, net_type=None, k=None):
+    def __init__(self, model=None, net_type=None, k=None, dataset=None, estimate_size=128):
         self.model = model
         self.criterion = nn.CrossEntropyLoss()
         self.net_type = net_type
         self.k = k
+        self.dataset = dataset
+        self.estimate_size = estimate_size
 
+        self._estimate_loader = None
         self.feature_list = None
         self.num_outputs = None
         self.lr = None
 
+    def sample_estimate(self):
+        if self._estimate_loader is None:
+            ds, _ = load_datasets(self.dataset)
+            self._estimate_loader = DataLoader(ds, batch_size=self.estimate_size, shuffle=True)
+        return next(iter(self._estimate_loader))
+
     def predict(self, x):
         assert self.lr is not None
-        scores = self.score(x)
+        estimate, _ = self.sample_estimate()
+        scores = self.score(estimate.cuda(), x)
         return -self.lr.predict(scores) + 1.
 
     def predict_proba(self, x):
         assert self.lr is not None
-        scores = self.score(x)
+        estimate, _ = self.sample_estimate()
+        scores = self.score(estimate.cuda(), x)
         return -self.lr.predict_proba(scores) + 1.
 
     def evaluate(self, in_test_loader, out_test_loader, noise_test_loader):
@@ -51,12 +66,20 @@ class LIDDetector:
 
         # Compute LID scores for in and out distributions
         print('Computing LID')
-        print('Scoring in dataset')
-        LID_in = self.score_for_loader(in_test_loader)
-        print('Scoring out of dataset')
-        LID_out = self.score_for_loader(out_test_loader)
-        print('Scoring noise')
-        LID_noise = self.score_for_loader(noise_test_loader)
+        LID_in = []
+        LID_out = []
+        LID_noise = []
+        out_test_iter = iter(out_test_loader)
+        noise_test_iter = iter(noise_test_loader)
+        for in_data, _ in tqdm(in_test_loader):
+            LID_in.append(self.score(in_data, in_data))
+            out_data = next(out_test_iter)[0]
+            LID_out.append(self.score(in_data, out_data))
+            noise_data = next(noise_test_iter)[0]
+            LID_noise.append(self.score(in_data, noise_data))
+        LID_in = np.concatenate(LID_in)
+        LID_out = np.concatenate(LID_out)
+        LID_noise = np.concatenate(LID_noise)
 
         # Create train/validation and test sets
         LID_in_val, LID_in_test = LID_in[:500], LID_in[500:]
@@ -97,10 +120,7 @@ class LIDDetector:
         res['recall'] = recall_score(labels_test, preds)
         return res
 
-    def score_for_loader(self, data_loader):
-        return np.concatenate([self.score(data) for data, _ in data_loader])
-
-    def score(self, data):
+    def score(self, estimate_data, data):
         data = data.cuda()
         data.requires_grad = True
 
@@ -108,17 +128,25 @@ class LIDDetector:
 
         # Activations
         output, out_features = self.model.feature_list(data)
+        est_out, est_features = self.model.feature_list(estimate_data)
         X_act = []
+        Est_act = []
         for i in range(self.num_outputs):
             out_features[i] = out_features[i].view(out_features[i].size(0),
                                                    out_features[i].size(1), -1)
             out_features[i] = torch.mean(out_features[i].data, 2)
             X_act.append(out_features[i].cpu().numpy().reshape((out_features[i].size(0), -1)))
 
+            est_features[i] = est_features[i].view(est_features[i].size(0),
+                                                   est_features[i].size(1), -1)
+            est_features[i] = torch.mean(est_features[i].data, 2)
+            Est_act.append(est_features[i].cpu().numpy().reshape(
+                (est_features[i].size(0), -1)))
+
         # LID
         LID_list = []
         for j in range(self.num_outputs):
-            lid_score = mle_batch(X_act[j], X_act[j], k=self.k)
+            lid_score = mle_batch(Est_act[j], X_act[j], k=self.k)
             lid_score = lid_score.reshape((lid_score.shape[0], -1))
 
             LID_list.append(lid_score)
@@ -154,6 +182,7 @@ def train_lid_adv(dataset,
                   net_type,
                   weights_path,
                   adv_attack,
+                  batch_size=128,
                   data_root='./datasets',
                   cuda_idx=0,
                   k=10):
@@ -163,14 +192,7 @@ def train_lid_adv(dataset,
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    if net_type == 'mnist':
-        network = MnistClassifier()
-        network.load_state_dict(torch.load(weights_path, map_location=f'cuda:0'))
-    elif net_type == 'resnet':
-        network = ResNet34(
-            10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
-        network.load_state_dict(torch.load(weights_path, map_location=f'cuda:0'))
-    network = network.cuda()
+    network = load_cls(net_type, weights_path, dataset)
 
     clean_data, adv_data, noisy_data = load_adv_dataset(dataset, adv_attack, net_type)
 
@@ -181,15 +203,15 @@ def train_lid_adv(dataset,
 
         def __iter__(self):
             if self.label_is_ones:
-                label = np.ones(64)
+                label = np.ones(batch_size)
             else:
-                label = np.zeros(64)
+                label = np.zeros(batch_size)
 
-            for i in range(self.ds.shape[0] // 64):
-                batch = self.ds[i * 64:(i + 1) * 64]
+            for i in range(self.ds.shape[0] // batch_size):
+                batch = self.ds[i * batch_size:(i + 1) * batch_size]
                 yield torch.tensor(batch), torch.tensor(label)
 
-    detector = LIDDetector(model=network, net_type='resnet', k=k)
+    detector = LIDDetector(model=network, net_type='resnet', k=k, dataset=dataset)
 
     in_test_loader = np_loader(clean_data, True)
     out_test_loader = np_loader(adv_data, False)
@@ -216,9 +238,11 @@ def train_lid_adv(dataset,
     return detector, results
 
 
-def train_multiple_lid_adv(net_type,
+def train_multiple_lid_adv(dataset,
+                           net_type,
                            weights_path,
                            adv_attack,
+                           batch_size=128,
                            data_root='./datasets/',
                            cuda_idx=0,
                            latex_print=False):
@@ -229,9 +253,11 @@ def train_multiple_lid_adv(net_type,
     best_auc = None
 
     for k in k_list:
-        detector, res = train_lid_adv(net_type,
+        detector, res = train_lid_adv(dataset,
+                                      net_type,
                                       weights_path,
                                       adv_attack,
+                                      batch_size=batch_size,
                                       data_root=data_root,
                                       cuda_idx=cuda_idx,
                                       k=k)
@@ -267,14 +293,14 @@ def train_multiple_lid_adv(net_type,
 
 
 def load_lid(net_type, dataset, adv_attack, k):
-    save_path = pathlib.Path('adv', f'lid_{net_type}_{dataset}_{adv_attack}_{k}.pt')
-    assert save_path.exists()
+    save_path = pathlib.Path(f'adv/lid_{net_type}_{dataset}_{adv_attack}_{k}.pt')
+    assert save_path.exists(), f'{save_path} does not exist'
     return torch.load(save_path)
 
 
 def load_best_lid(net_type, dataset, adv_attack):
-    save_path = pathlib.Path('adv', f'lid_{net_type}_{dataset}_{adv_attack}_best.pt')
-    assert save_path.exists()
+    save_path = pathlib.Path(f'adv/lid_{net_type}_{dataset}_{adv_attack}_best.pt')
+    assert save_path.exists(), f'{save_path} does not exist'
     return torch.load(save_path)
 
 

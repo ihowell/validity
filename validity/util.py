@@ -9,6 +9,7 @@ def get_executor():
     executor = submitit.AutoExecutor(folder='logs')
     executor.update_parameters(timeout_min=7 * 24 * 60,
                                gpus_per_node=1,
+                               tasks_per_node=1,
                                slurm_partition='gpu',
                                slurm_gres='gpu',
                                slurm_mem_per_cpu='32G',

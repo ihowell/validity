@@ -179,6 +179,7 @@ def train(beta=1.,
           mutation_rate=None,
           anneal_epochs=None,
           warm_epochs=None):
+    print('Beta', beta)
     beta = float(beta)
     vae = MnistVAE(beta=beta)
     vae = vae.cuda()
@@ -280,6 +281,12 @@ def train(beta=1.,
 
         if early_stopping(val_loss):
             break
+
+
+def train_multiple_bg(mutation_rates, **kwargs):
+    print(f'{kwargs=}')
+    for mutation_rate in mutation_rates:
+        train(mutation_rate=mutation_rate, **kwargs)
 
 
 def encode_dataset(gan_path, batch_size=512, data_root='./datasets/', cuda_idx=0, seed=0):

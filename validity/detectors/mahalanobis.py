@@ -13,10 +13,13 @@ from torchvision import transforms, datasets
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
 
-from sklearn.linear_model import LogisticRegressionCV
+from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
 from sklearn.covariance import EmpiricalCovariance
 from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
+from sklearn.preprocessing import StandardScaler
 
+from validity.classifiers import load_cls
+from validity.datasets import load_datasets
 from validity.util import np_loader
 
 
@@ -33,14 +36,16 @@ class MahalanobisDetector:
         self.sample_mean = None
         self.precision = None
         self.lr = None
+        self.sc = None
 
     def predict(self, inputs):
-        assert self.lr is not None
+        assert self.lr is not None and self.sc is not None
         Mahalanobis = []
         for layer_idx in range(self.num_outputs):
             Mahalanobis.append(self.score(inputs, layer_idx))
         Mahalanobis = np.stack(Mahalanobis, axis=1)
-        return -self.lr.predict(Mahalanobis) + 1.
+        scaled = self.sc.transform(Mahalanobis)
+        return -self.lr.predict(scaled) + 1.
 
     def predict_proba(self, inputs):
         assert self.lr is not None
@@ -48,7 +53,8 @@ class MahalanobisDetector:
         for layer_idx in range(self.num_outputs):
             Mahalanobis.append(self.score(inputs, layer_idx))
         Mahalanobis = np.stack(Mahalanobis, axis=1)
-        return -self.lr.predict_proba(Mahalanobis) + 1.
+        scaled = self.sc.transform(Mahalanobis)
+        return -self.lr.predict_proba(scaled) + 1.
 
     def train(self, in_train_loader):
         # Set network to evaluation mode
@@ -108,16 +114,20 @@ class MahalanobisDetector:
             labels_test = np.concatenate(
                 [labels_test, np.ones(Mahalanobis_noise_test.shape[0])])
 
+        self.sc = StandardScaler()
+        scaled_data_val = self.sc.fit_transform(Mahalanobis_val)
+        scaled_data_test = self.sc.transform(Mahalanobis_test)
+
         # Train regressor
         print('Training regressor')
-        self.lr = LogisticRegressionCV(n_jobs=-1).fit(Mahalanobis_val, labels_val)
+        self.lr = LogisticRegressionCV(n_jobs=-1).fit(scaled_data_val, labels_val)
 
         # Evaluate regressor
         print('Evaluating regressor')
-        test_probs = self.lr.predict_proba(Mahalanobis_test)[:, 1]
-        preds = self.lr.predict(Mahalanobis_test)
-
         res = {}
+        test_probs = self.lr.predict_proba(scaled_data_test)[:, 1]
+        preds = self.lr.predict(scaled_data_test)
+
         fpr, tpr, thresholds = roc_curve(labels_test, test_probs)
         res['plot'] = (fpr, tpr)
         res['auc_score'] = auc(fpr, tpr)
@@ -125,7 +135,6 @@ class MahalanobisDetector:
             if t >= 0.95:
                 res['fpr_at_tpr_95'] = f
                 break
-
         res['accuracy'] = accuracy_score(labels_test, preds)
         res['precision'] = precision_score(labels_test, preds)
         res['recall'] = recall_score(labels_test, preds)
@@ -269,20 +278,10 @@ def train_mahalanobis_ood(in_dataset,
                           data_root='./datasets/',
                           cuda_idx=0,
                           magnitude=1e-2):
-    from validity.classifiers.resnet import ResNet34
-    from validity.classifiers.mnist import MnistClassifier
-    from validity.datasets import load_datasets
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    if net_type == 'mnist':
-        network = MnistClassifier()
-        network.load_state_dict(torch.load(weights_path, map_location=f'cuda:0'))
-    elif net_type == 'resnet':
-        network = ResNet34(
-            10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
-        network.load_state_dict(torch.load(weights_path, map_location=f'cuda:0'))
-    network = network.cuda()
+    network = load_cls(net_type, weights_path, in_dataset)
 
     if in_dataset == 'mnist':
         num_labels = 10
@@ -337,7 +336,7 @@ def train_mahalanobis_adv(dataset,
     from validity.classifiers.resnet import ResNet34
     from validity.classifiers.mnist import MnistClassifier
     from validity.adv_dataset import load_adv_dataset
-    from validity.datasets import load_datasets
+
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
@@ -488,6 +487,29 @@ def train_multiple_mahalanobis_adv(dataset,
             print(' & '.join(new_row) + '\\\\')
     else:
         print(tabulate(result_table))
+
+
+def evaluate_best_mahalanobis_ood(net_type, in_dataset, out_dataset):
+    detector = load_best_mahalanobis_ood(net_type, in_dataset, out_dataset)
+    detector.eval()
+
+    in_train_ds, in_test_ds = load_datasets(in_dataset)
+    out_train_ds, out_test_ds = load_datasets(out_dataset)
+
+    in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)
+    out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=64, shuffle=True)
+
+    in_preds = [detector.predict(data) for data, _ in in_test_loader]
+    out_preds = [detector.predict(data) for data, _ in out_test_loader]
+    in_preds = np.concatenate(in_preds)
+    out_preds = np.concatenate(out_preds)
+
+    in_correct = np.where(in_preds == 0., 1., 0.)
+    out_correct = np.where(out_preds == 1., 1., 0.)
+    correct = np.concatenate([in_correct, out_correct])
+
+    acc = correct.mean()
+    print(f'Accuracy: {acc:.4f}')
 
 
 def load_mahalanobis_ood(net_type, in_dataset, out_dataset, magnitude):

@@ -9,12 +9,19 @@ Original code is from https://github.com/kuangliu/pytorch-cifar/blob/master/mode
 '''
 import os
 import math
+import fire
 import torch
 import torch.nn as nn
+from tqdm import tqdm
 import torch.nn.functional as F
 
 from torch.autograd import Variable
 from torch.nn.parameter import Parameter
+import torch.optim as optim
+from tensorboardX import SummaryWriter
+
+from validity.datasets import load_datasets
+from validity.util import EarlyStopping
 
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -95,10 +102,7 @@ class Bottleneck(nn.Module):
                                padding=1,
                                bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
-        self.conv3 = nn.Conv2d(planes,
-                               self.expansion * planes,
-                               kernel_size=1,
-                               bias=False)
+        self.conv3 = nn.Conv2d(planes, self.expansion * planes, kernel_size=1, bias=False)
         self.bn3 = nn.BatchNorm2d(self.expansion * planes)
 
         self.shortcut = nn.Sequential()
@@ -135,10 +139,7 @@ class PreActBottleneck(nn.Module):
                                padding=1,
                                bias=False)
         self.bn3 = nn.BatchNorm2d(planes)
-        self.conv3 = nn.Conv2d(planes,
-                               self.expansion * planes,
-                               kernel_size=1,
-                               bias=False)
+        self.conv3 = nn.Conv2d(planes, self.expansion * planes, kernel_size=1, bias=False)
 
         if stride != 1 or in_planes != self.expansion * planes:
             self.shortcut = nn.Sequential(
@@ -159,12 +160,12 @@ class PreActBottleneck(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10, in_transform=None):
+    def __init__(self, block, num_blocks, num_classes=10, in_channels=3, in_transform=None):
         super(ResNet, self).__init__()
         self.in_planes = 64
         self.in_transform = in_transform
 
-        self.conv1 = conv3x3(3, 64)
+        self.conv1 = conv3x3(in_channels, 64)
         self.bn1 = nn.BatchNorm2d(64)
         self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
         self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
@@ -249,14 +250,15 @@ class ResNet(nn.Module):
         return y, penultimate
 
 
-def ResNet18(num_c):
-    return ResNet(PreActBlock, [2, 2, 2, 2], num_classes=num_c)
+def ResNet18(num_c, in_ch):
+    return ResNet(PreActBlock, [2, 2, 2, 2], num_classes=num_c, in_channels=in_ch)
 
 
-def ResNet34(num_c, in_transform=None):
+def ResNet34(num_c, in_ch, in_transform=None):
     return ResNet(BasicBlock, [3, 4, 6, 3],
                   num_classes=num_c,
-                  in_transform=in_transform)
+                  in_transform=in_transform,
+                  in_channels=in_ch)
 
 
 def ResNet50():
@@ -294,11 +296,12 @@ def eval_network(weights_path, data_root='./', cuda_idx=0):
 
     in_transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010)),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ])
-    in_train_loader = torch.utils.data.DataLoader(datasets.CIFAR10(
-        root=data_root, train=False, download=True, transform=in_transform),
+    in_train_loader = torch.utils.data.DataLoader(datasets.CIFAR10(root=data_root,
+                                                                   train=False,
+                                                                   download=True,
+                                                                   transform=in_transform),
                                                   batch_size=64,
                                                   shuffle=True)
 
@@ -310,3 +313,86 @@ def eval_network(weights_path, data_root='./', cuda_idx=0):
         preds = torch.argmax(outputs, 1)
         acc.append(torch.mean(torch.where(preds == labels, 1.0, 0.0)))
     print('accuracy', np.mean(acc))
+
+
+def train_network(dataset,
+                  net_type,
+                  max_epochs=1000,
+                  data_root='./datasets/',
+                  cuda_idx=0,
+                  batch_size=64):
+    if dataset == 'mnist':
+        num_labels = 10
+        in_channels = 1
+    elif dataset == 'cifar10':
+        num_labels = 10
+        in_channels = 3
+
+    if net_type == 'resnet18':
+        net = ResNet18(num_labels, in_channels)
+    elif net_type == 'resnet34' or 'resnet':
+        net = ResNet34(num_labels, in_channels)
+    net = net.cuda()
+    net.train()
+
+    train_set, test_set = load_datasets(dataset)
+    train_set, val_set = torch.utils.data.random_split(train_set, [50000, 10000])
+
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    val_loader = torch.utils.data.DataLoader(val_set, batch_size=batch_size, shuffle=True)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, shuffle=True)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(net.parameters(), weight_decay=1e-4)
+
+    early_stopping = EarlyStopping(net.state_dict(), f'models/cls_{net_type}_{dataset}.pt')
+    writer = SummaryWriter(f'models/cls_{net_type}_{dataset}_res')
+
+    step = 0
+    for epoch in range(max_epochs):
+        print(f'Epoch {epoch}')
+        for data, labels in tqdm(train_loader):
+            optimizer.zero_grad()
+            outputs = net(data.cuda())
+            loss = criterion(outputs, labels.cuda())
+            loss.backward()
+            optimizer.step()
+            writer.add_scalar('train/loss', loss, step)
+            step += 1
+
+        losses = []
+        with torch.no_grad():
+            correct = 0.
+            total = 0.
+            for data, labels in tqdm(val_loader):
+                outputs = net(data.cuda())
+                loss = criterion(outputs, labels.cuda())
+                losses.append(loss)
+                writer.add_scalar('valid/loss', loss, step)
+                step += 1
+
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels.cuda()).sum().item()
+            writer.add_scalar('valid/accuracy', correct / total, step)
+
+        loss = torch.mean(torch.tensor(loss))
+        if early_stopping(loss):
+            break
+
+    losses = []
+    correct = 0.
+    total = 0.
+    with torch.no_grad():
+        for data, labels in test_loader:
+            outputs = net(data.cuda())
+            loss = criterion(outputs, labels.cuda())
+            losses.append(loss)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels.cuda()).sum().item()
+
+    print(f'Accuracy {correct / total}')
+
+
+if __name__ == '__main__':
+    fire.Fire()

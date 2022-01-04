@@ -19,19 +19,18 @@ import numpy as np
 from torchvision import datasets, transforms
 from tensorboardX import SummaryWriter
 
-from validity.classifiers import MnistClassifier, ResNet34
+from validity.classifiers import load_cls
 from validity.datasets import load_datasets
-from validity.generators import load_gen
+from validity.generators.load import load_gen
 from validity.util import EarlyStopping
 
 
-def cdeepex(encode,
-            decode,
+def cdeepex(generator,
             classifier,
             x_start,
             y_probe,
             num_classes,
-            writer,
+            writer=None,
             z_start=None,
             inner_iters=100,
             outer_iters=10000,
@@ -48,13 +47,13 @@ def cdeepex(encode,
 
     """
     x_start = x_start.cuda()
-    if z_start:
+    if z_start is not None:
         z_0 = z_start.cuda()
     else:
-        z_0 = encode(x_start).clone().detach()
+        z_0 = generator.encode(x_start).clone().detach()
 
     z = z_0.clone().detach().requires_grad_()
-    del_z_0 = (x_start - decode(z_0)[0]).clone().detach()
+    del_z_0 = (x_start - generator.decode(z_0)).clone().detach()
     y_true = classifier(x_start).argmax(-1)
     y_probe = y_probe.cuda()
 
@@ -71,7 +70,7 @@ def cdeepex(encode,
                                 if i not in [y_true, y_probe]]).cuda()
 
     def h(z, y_1, y_2):
-        img = decode(z)[0]
+        img = generator.decode(z)
         logits = classifier(img)
         return (logits.index_select(1, y_1) - logits.index_select(1, y_2)).squeeze(-1)
 
@@ -107,32 +106,35 @@ def cdeepex(encode,
         vals = mu_2 + c * h(z, y_probe, y_prime_idx)
         mu_2 = torch.maximum(torch.zeros_like(vals).cuda(), vals).detach()
 
-        del_x = decode(z)[0] - decode(old_z)[0]
+        del_x = generator.decode(z) - generator.decode(old_z)
         del_x_norm = del_x.norm()
 
         if h(z, y_true, y_probe) > gamma * h(old_z, y_true, y_probe):
             c = c * beta
 
-        logits = classifier(decode(z)[0])
+        logits = classifier(generator.decode(z))
 
-        writer.add_scalar('cdeepex/loss', loss, i)
-        writer.add_scalar('cdeepex/obj', obj, i)
-        writer.add_scalar('cdeepex/probe', probe, i)
-        writer.add_scalar('cdeepex/constraint_1', constraint_1, i)
-        writer.add_scalar('cdeepex/constraint_2', constraint_2, i)
-        writer.add_scalar('cdeepex/lam', lam.mean(), i)
-        writer.add_scalar('cdeepex/mu_1', mu_1.mean(), i)
-        writer.add_scalar('cdeepex/mu_2', mu_2.mean(), i)
-        writer.add_scalar('cdeepex/penalty', c, i)
-        writer.add_scalar('cdeepex/del x', del_x_norm, i)
-        writer.add_scalar('logits/h', h(z, y_true, y_probe), i)
-        writer.add_scalar('logits/logit orig', logits.index_select(1, y_true), i)
-        writer.add_scalar('logits/logit target', logits.index_select(1, y_probe), i)
-        writer.add_scalar('logits/max y prime', h(z, y_probe, y_prime_idx).max(), i)
+        if writer:
+            writer.add_scalar('cdeepex/loss', loss, i)
+            writer.add_scalar('cdeepex/obj', obj, i)
+            writer.add_scalar('cdeepex/probe', probe, i)
+            writer.add_scalar('cdeepex/constraint_1', constraint_1, i)
+            writer.add_scalar('cdeepex/constraint_2', constraint_2, i)
+            writer.add_scalar('cdeepex/lam', lam.mean(), i)
+            writer.add_scalar('cdeepex/mu_1', mu_1.mean(), i)
+            writer.add_scalar('cdeepex/mu_2', mu_2.mean(), i)
+            writer.add_scalar('cdeepex/penalty', c, i)
+            writer.add_scalar('cdeepex/del x', del_x_norm, i)
+            writer.add_scalar('logits/h', h(z, y_true, y_probe), i)
+            writer.add_scalar('logits/logit orig', logits.index_select(1, y_true), i)
+            writer.add_scalar('logits/logit target', logits.index_select(1, y_probe), i)
+            writer.add_scalar('logits/max y prime', h(z, y_probe, y_prime_idx).max(), i)
 
-        img = torch.cat([x_start, decode(z_0)[0], decode(z)[0]], 3)[0]
-        writer.add_image('cdeepex/example', torch.tensor(img), i)
+            img = torch.cat([x_start, generator.decode(z_0), generator.decode(z)], 3)[0]
+            writer.add_image('cdeepex/example', torch.tensor(img), i)
+
         print(f'Min loss: {loss}')
+
         if del_x_norm < del_x_threshold:
             steps_under_threshold += 1
             if steps_under_threshold >= del_x_patience:
@@ -140,7 +142,7 @@ def cdeepex(encode,
         else:
             steps_under_threshold = 0
 
-    return decode(z_0)[0], decode(z)[0]
+    return generator.decode(z)
 
 
 def run_cdeepex(dataset,
@@ -148,7 +150,6 @@ def run_cdeepex(dataset,
                 classifier_weights_path,
                 generator_net_type,
                 generator_weights_path,
-                class_coef=1.0,
                 data_root='./datasets/',
                 cuda_idx=0,
                 seed=1):
@@ -161,22 +162,25 @@ def run_cdeepex(dataset,
     if dataset == 'mnist':
         num_classes = 10
 
-    classifier = load_cls(classifier_net_type, classifier_weights_path)
+    classifier = load_cls(classifier_net_type, classifier_weights_path, dataset)
     classifier.eval()
 
     generator = load_gen(generator_net_type, generator_weights_path)
     generator.eval()
 
-    for data, label in in_test_loader:
-        break
-
+    data, label = next(iter(in_test_loader))
     target_label = (label + 1) % 10
 
     print('label', label)
     print('target label', target_label)
 
     writer = SummaryWriter()
-    x, x_hat = cdeepex(encode, decode, classifier, data, target_label, num_classes, writer)
+    x_hat = cdeepex(generator, classifier, data, target_label, num_classes, writer)
+    img = x_hat.cpu().detach()
+    img = torch.cat([data, img], 3)[0].numpy()
+    img = np.transpose(img, (1, 2, 0))
+    plt.imshow(img)
+    plt.show()
 
 
 if __name__ == '__main__':

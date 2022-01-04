@@ -24,6 +24,21 @@ class LikelihoodRatioDetector:
     def __init__(self, ll_est=None, bg_ll_est=None):
         self.ll_est = ll_est
         self.bg_ll_est = bg_ll_est
+        self.lr = None
+
+    def predict(self, x):
+        x = x.cuda()
+        llr = self.ll_est.log_prob(x) - self.bg_ll_est.log_prob(x)
+        llr = llr.cpu().detach().numpy()
+        llr = np.expand_dims(llr, -1)
+        return self.lr.predict(llr)
+
+    def predict_proba(self, x):
+        x = x.cuda()
+        llr = self.ll_est.log_prob(x) - self.bg_ll_est.log_prob(x)
+        llr = llr.cpu().detach().numpy()
+        llr = np.expand_dims(llr, -1)
+        return self.lr.predict_proba(llr)
 
     def train(self, in_train_loader, out_train_loader):
         self.ll_est.eval()
@@ -95,6 +110,7 @@ def train_llr_ood(in_dataset,
                   net_type,
                   foreground_path,
                   background_path,
+                  mutation_rate,
                   data_root='./datasets',
                   cuda_idx=0):
     from validity.generators.nvae.model import load_nvae
@@ -135,7 +151,7 @@ def train_llr_ood(in_dataset,
     # evaluate detector
     results = detector.evaluate(in_val_loader, out_val_loader)
 
-    save_path = pathlib.Path('ood', f'llr_{in_dataset}_{out_dataset}_ood.pt')
+    save_path = pathlib.Path('ood', f'llr_{in_dataset}_{out_dataset}_{mutation_rate}_ood.pt')
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(detector, save_path)
 
@@ -149,6 +165,40 @@ def train_llr_ood(in_dataset,
                 continue
         print(f'{result_name:20}: {result:.4f}')
     return results
+
+
+def evaluate_llr(in_dataset, out_dataset, mutation_rate):
+    llr = load_llr(in_dataset, out_dataset, mutation_rate)
+
+    in_train_ds, in_test_ds = load_datasets(in_dataset)
+    out_train_ds, out_test_ds = load_datasets(out_dataset)
+
+    in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)
+    out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=64, shuffle=True)
+
+    in_preds = [llr.predict(data) for data, _ in in_test_loader]
+    out_preds = [llr.predict(data) for data, _ in out_test_loader]
+    in_preds = np.concatenate(in_preds)
+    out_preds = np.concatenate(out_preds)
+
+    in_correct = np.where(in_preds == 0., 1., 0.)
+    out_correct = np.where(out_preds == 1., 1., 0.)
+    correct = np.concatenate([in_correct, out_correct])
+
+    acc = correct.mean()
+    print(f'Accuracy: {acc:.4f}')
+
+
+def load_llr(in_dataset, out_dataset, mutation_rate):
+    save_path = pathlib.Path(f'ood/llr_{in_dataset}_{out_dataset}_{mutation_rate}_ood.pt')
+    assert save_path.exists(), f'{save_path} does not exist'
+    return torch.load(save_path)
+
+
+def load_best_llr(in_dataset, out_dataset):
+    save_path = pathlib.Path(f'ood/llr_{in_dataset}_{out_dataset}_best_ood.pt')
+    assert save_path.exists(), f'{save_path} does not exist'
+    return torch.load(save_path)
 
 
 if __name__ == '__main__':

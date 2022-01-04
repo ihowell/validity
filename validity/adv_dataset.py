@@ -12,8 +12,7 @@ from cleverhans.torch.attacks.fast_gradient_method import fast_gradient_method
 from torchvision import transforms, datasets
 from tqdm import tqdm
 
-from validity.classifiers.mnist import MnistClassifier
-from validity.classifiers.resnet import ResNet34
+from validity.classifiers import load_cls
 from validity.datasets import load_datasets
 
 
@@ -77,13 +76,8 @@ def construct_dataset(dataset, attack, net_type, weights_location, data_root='./
         elif dataset == 'cifar10':
             confidence = 7.439  # Average logit marginal in training set
 
-    if net_type == 'resnet':
-        network = ResNet34(
-            10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
-        network.load_state_dict(torch.load(weights_location, map_location=f'cuda:0'))
-    elif net_type == 'mnist':
-        network = MnistClassifier()
-        network.load_state_dict(torch.load(weights_location, map_location=f'cuda:0'))
+    network = load_cls(net_type, weights_location, dataset)
+    network.eval()
 
     if dataset == 'mnist':
         ds_mean = (0.1307, )

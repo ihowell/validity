@@ -10,9 +10,11 @@ from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, rec
 
 from validity.adv_dataset import load_adv_dataset
 from validity.datasets import load_datasets
-from validity.detectors.lid import load_best_lid, load_lid, LIDDetector
-from validity.detectors.mahalanobis import MahalanobisDetector, load_best_mahalanobis_adv, load_best_mahalanobis_ood, load_mahalanobis_ood, load_mahalanobis_adv
-from validity.detectors.odin import ODINDetector, load_best_odin, load_odin
+from validity.detectors.load import load_detectors
+from validity.detectors.lid import LIDDetector
+from validity.detectors.mahalanobis import MahalanobisDetector
+from validity.detectors.llr import LikelihoodRatioDetector
+from validity.detectors.odin import ODINDetector
 from validity.util import np_loader
 
 
@@ -21,15 +23,19 @@ def main(net_type,
          out_ds_name,
          adv_attack,
          data_root='./datasets/',
-         adv_step=True):
+         adv_step=True,
+         batch_size=64):
     torch.cuda.manual_seed(0)
 
     # Load datasets
     _, in_test_ds = load_datasets(in_ds_name)
-    in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=1, shuffle=False)
-
     _, out_test_ds = load_datasets(out_ds_name)
-    out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=1, shuffle=False)
+    in_test_loader = torch.utils.data.DataLoader(in_test_ds,
+                                                 batch_size=batch_size,
+                                                 shuffle=False)
+    out_test_loader = torch.utils.data.DataLoader(out_test_ds,
+                                                  batch_size=batch_size,
+                                                  shuffle=False)
 
     orig_data, adv_data, noise_data = load_adv_dataset(in_ds_name, adv_attack, net_type)
     orig_data = orig_data[500:]
@@ -38,30 +44,13 @@ def main(net_type,
     clean_data = np.concatenate([orig_data, noise_data])
 
     # Load detectors
-    llr_ood = get_llr_detector(in_ds_name, out_ds_name, batch_size)
+    ood_detectors, adv_detectors = load_detectors(in_ds_name,
+                                                  out_ds_name,
+                                                  net_type,
+                                                  adv_attack,
+                                                  adv_step=adv_step)
 
-    lid_adv = load_best_lid(net_type, in_ds_name, adv_attack)
-    if adv_step:
-        odin_ood = load_best_odin(net_type, in_ds_name, out_ds_name)
-        mahalanobis_ood = load_best_mahalanobis_ood(net_type, in_ds_name, out_ds_name)
-
-        mahalanobis_adv = load_best_mahalanobis_adv(net_type, in_ds_name, adv_attack)
-    else:
-        odin_ood = load_odin(net_type, in_ds_name, out_ds_name, 0, 1000.)
-        mahalanobis_ood = load_mahalanobis_ood(net_type, in_ds_name, out_ds_name, 0)
-
-        mahalanobis_adv = load_mahalanobis_adv(net_type, in_ds_name, adv_attack, 0)
-
-    detectors = [
-        # OOD
-        (f'ODIN OOD {out_ds_name}', odin_ood),
-        (f'Mahalanobis OOD {out_ds_name}', mahalanobis_ood),
-        (f'LLR OOD {out_ds_name}', llr_ood),
-
-        # ADV
-        (f'LID Adv {adv_attack}', lid_adv),
-        (f'Mahalanobis Adv {adv_attack}', mahalanobis_adv),
-    ]
+    detectors = ood_detectors + adv_detectors
 
     # Evaluate all on ood datasets
     ood_res = {}
