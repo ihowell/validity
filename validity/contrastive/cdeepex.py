@@ -37,6 +37,8 @@ def cdeepex(generator,
             tb_writer=None,
             strategy=None,
             seed=None,
+            del_x_threshold=1e-1,
+            del_x_patience=100,
             **kwargs):
     """Performs activation maximization using the generator as an
     approximation of the data manifold.
@@ -63,8 +65,6 @@ def cdeepex(generator,
     mu_2 = torch.tensor([1.]).cuda()
     beta = 1.01
     gamma = 0.24
-    del_x_threshold = 1e-1
-    del_x_patience = 300
 
     print(f'{y_true=}')
     print(f'{y_probe=}')
