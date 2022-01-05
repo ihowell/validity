@@ -92,6 +92,7 @@ def _make_contrastive_dataset_job(contrastive_type,
         target_labels = torch.arange(num_labels).reshape((-1, 1)).expand(-1, n).reshape([-1])
 
         for target_label in target_labels:
+            target_label = target_label.unsqueeze(0)
             if contrastive_type == 'xgems':
                 x_hat = xgems(generator, classifier, data, target_label, z_start=encoded_data)
             elif contrastive_type == 'cdeepex':

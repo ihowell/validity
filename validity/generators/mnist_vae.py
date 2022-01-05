@@ -1,3 +1,5 @@
+import pathlib
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,12 +8,12 @@ import torch.optim as optim
 import fire
 from tqdm import tqdm
 from torchvision import transforms, datasets
+import numpy as np
 
 from tensorboardX import SummaryWriter
 
 from validity.datasets import load_datasets
 from validity.util import EarlyStopping
-from .mixture import discretized_mix_logistic_loss, sample_from_discretized_mix_logistic
 
 SIG_EPSILON = 1e-2
 CLIP_GRAD_VALUE = 10.
@@ -179,7 +181,6 @@ def train(beta=1.,
           mutation_rate=None,
           anneal_epochs=None,
           warm_epochs=None):
-    print('Beta', beta)
     beta = float(beta)
     vae = MnistVAE(beta=beta)
     vae = vae.cuda()
@@ -189,7 +190,7 @@ def train(beta=1.,
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
     val_loader = torch.utils.data.DataLoader(val_set, batch_size=batch_size, shuffle=True)
 
-    save_name = f'mnist_{beta}'
+    save_name = f'vae_mnist_{beta}'
     if mutation_rate:
         save_name += f'_bg_{mutation_rate}'
     if anneal_epochs:
@@ -197,8 +198,8 @@ def train(beta=1.,
     if warm_epochs:
         save_name += f'_warm_{warm_epochs}'
 
-    writer = SummaryWriter('vae/' + save_name)
-    save_path = f'vae/{save_name}.pt'
+    writer = SummaryWriter('models/' + save_name)
+    save_path = f'models/{save_name}.pt'
 
     optimizer = optim.Adam(vae.parameters(), weight_decay=1e-4)
 
@@ -289,7 +290,7 @@ def train_multiple_bg(mutation_rates, **kwargs):
         train(mutation_rate=mutation_rate, **kwargs)
 
 
-def encode_dataset(gan_path, batch_size=512, data_root='./datasets/', cuda_idx=0, seed=0):
+def encode_dataset(weights_path, batch_size=512, data_root='./datasets/', cuda_idx=0, seed=0):
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -307,13 +308,25 @@ def encode_dataset(gan_path, batch_size=512, data_root='./datasets/', cuda_idx=0
     for data, label in tqdm(test_loader):
         data = data
         z = vae.encode(data.cuda())
-        test_data.append(z.cpu().numpy())
-        test_labels.append(label.numpy())
+        test_data.append(z.cpu().detach().numpy())
+        test_labels.append(label.detach().numpy())
     test_data = np.concatenate(test_data)
     test_labels = np.concatenate(test_labels)
 
     pathlib.Path('data').mkdir(exist_ok=True)
-    np.savez(f'data/vae_encode_{dataset}_test.npz', test_data, test_labels)
+    np.savez(f'data/vae_encode_mnist_test.npz', test_data, test_labels)
+
+
+def get_save_path(beta=1., mutation_rate=None, anneal_epochs=None, warm_epochs=None):
+    save_name = f'vae_mnist_{beta}'
+    if mutation_rate:
+        save_name += f'_bg_{mutation_rate}'
+    if anneal_epochs:
+        save_name += f'_anneal_{anneal_epochs}'
+    if warm_epochs:
+        save_name += f'_warm_{warm_epochs}'
+    save_path = f'models/{save_name}.pt'
+    return save_path
 
 
 if __name__ == '__main__':

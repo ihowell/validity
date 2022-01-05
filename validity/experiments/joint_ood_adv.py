@@ -17,6 +17,22 @@ from validity.detectors.llr import LikelihoodRatioDetector
 from validity.detectors.odin import ODINDetector
 from validity.util import np_loader
 
+from validity.generators.mnist_vae import train as train_mnist_vae
+
+MNIST_VAE_KWARGS = {beta: 20.}
+MNIST_BG_VAE_KWARGS = {beta: 20., mutation_rate: 0.3}
+
+
+def pre(mnist_vae_kwargs):
+    executor = get_executor()
+    jobs = []
+    with executor.batch():
+        if not pathlib.Path(mnist_vae_save_path(**MNIST_VAE_KWARGS)).exists():
+            executor.submit(train_mnist_vae, **MNIST_VAE_KWARGS)
+
+        if not pathlib.Path(mnist_vae_save_path(**MNIST_BG_VAE_KWARGS)).exists():
+            executor.submit(train_mnist_vae, **MNIST_BG_VAE_KWARGS)
+
 
 def main(net_type,
          in_ds_name,

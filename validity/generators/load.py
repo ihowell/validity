@@ -8,7 +8,7 @@ from .wgan_gp import WGAN_GP
 
 
 def load_gen(gen_type, weights_path):
-    if gen_type == 'mnist':
+    if gen_type == 'mnist_vae':
         generator = MnistVAE()
         generator.load_state_dict(torch.load(weights_path))
 
