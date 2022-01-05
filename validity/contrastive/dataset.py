@@ -64,7 +64,8 @@ def _make_contrastive_dataset_job(contrastive_type,
                                   shards,
                                   data_root='./datasets/',
                                   cuda_idx=0,
-                                  seed=1):
+                                  seed=1,
+                                  **kwargs):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
@@ -94,14 +95,20 @@ def _make_contrastive_dataset_job(contrastive_type,
         for target_label in target_labels:
             target_label = target_label.unsqueeze(0)
             if contrastive_type == 'xgems':
-                x_hat = xgems(generator, classifier, data, target_label, z_start=encoded_data)
+                x_hat = xgems(generator,
+                              classifier,
+                              data,
+                              target_label,
+                              z_start=encoded_data,
+                              **kwargs)
             elif contrastive_type == 'cdeepex':
                 x_hat = cdeepex(generator,
                                 classifier,
                                 data,
                                 target_label,
                                 num_labels,
-                                z_start=encoded_data)
+                                z_start=encoded_data,
+                                **kwargs)
 
             examples.append(x_hat.cpu().detach().numpy())
 

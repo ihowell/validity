@@ -66,8 +66,6 @@ def cdeepex(generator,
     beta = 1.01
     gamma = 0.24
 
-    print(f'{y_true=}')
-    print(f'{y_probe=}')
     y_prime_idx = torch.tensor([i for i in range(num_classes)
                                 if i not in [y_true, y_probe]]).cuda()
 
@@ -135,7 +133,7 @@ def cdeepex(generator,
             img = torch.cat([x_start, generator.decode(z_0), generator.decode(z)], 3)[0]
             writer.add_image('cdeepex/example', torch.tensor(img), i)
 
-        print(f'Min loss: {loss}')
+        print(f'step: {i} min loss: {float(loss):.4f} del x: {float(del_x_norm):.4f}')
 
         if del_x_norm < del_x_threshold:
             steps_under_threshold += 1
