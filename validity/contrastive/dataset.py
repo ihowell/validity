@@ -2,6 +2,7 @@ from pathlib import Path
 
 import fire
 import torch
+import numpy as np
 
 from tqdm import tqdm
 
@@ -90,10 +91,9 @@ def _make_contrastive_dataset_job(contrastive_type,
     examples = []
     example_labels = []
     for (data, _), (encoded_data, _) in tqdm(zip_loader):
-        target_labels = torch.arange(num_labels).reshape((-1, 1)).expand(-1, n).reshape([-1])
-
-        for target_label in target_labels:
-            target_label = target_label.unsqueeze(0)
+        for target_label in range(num_labels):
+            target_label = torch.tensor(target_label).unsqueeze(0)
+            print(f'{target_label=}')
             if contrastive_type == 'xgems':
                 x_hat = xgems(generator,
                               classifier,
@@ -111,15 +111,15 @@ def _make_contrastive_dataset_job(contrastive_type,
                                 **kwargs)
 
             examples.append(x_hat.cpu().detach().numpy())
-
-        example_labels.append(target_labels.numpy())
+            example_labels.append(target_label.numpy())
 
     examples = np.concatenate(examples)
     example_labels = np.concatenate(example_labels)
 
     Path('data/tmp').mkdir(exist_ok=True, parents=True)
-    np.savez(f'data/tmp/xgems_{generator_net_type}_{dataset}_{shard_idx}_{shards}.npz',
-             examples, example_labels)
+    np.savez(
+        f'data/tmp/{contrastive_type}_{generator_net_type}_{dataset}_{shard_idx}_{shards}.npz',
+        examples, example_labels)
 
 
 if __name__ == '__main__':
