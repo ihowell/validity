@@ -48,6 +48,7 @@ def cdeepex(generator,
         y_target (tf.Tensor): ()
 
     """
+    n = x_start.size(0)
     x_start = x_start.cuda()
     if z_start is not None:
         z_0 = z_start.cuda()
@@ -60,9 +61,9 @@ def cdeepex(generator,
     y_probe = y_probe.cuda()
 
     c = 1.
-    lam = torch.tensor([1.]).cuda()
-    mu_1 = torch.tensor([1.]).cuda()
-    mu_2 = torch.tensor([1.]).cuda()
+    lam = torch.tensor([1.] * n).cuda()
+    mu_1 = torch.tensor([1.] * n).cuda()
+    mu_2 = torch.tensor([1.] * n).cuda()
     beta = 1.01
     gamma = 0.24
 

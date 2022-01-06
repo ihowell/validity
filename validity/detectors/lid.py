@@ -123,6 +123,7 @@ class LIDDetector:
     def score(self, estimate_data, data):
         data = data.cuda()
         data.requires_grad = True
+        estimate_data = estimate_data.cuda()
 
         LID = []
 

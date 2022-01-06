@@ -30,3 +30,27 @@ def load_detectors(in_ds_name, out_ds_name, cls_type, adv_attack, adv_step=True)
         (f'Mahalanobis Adv {adv_attack}', mahalanobis_adv),
     ]
     return ood_detectors, adv_detectors
+
+
+def load_ood_detectors(cls_type, in_ds_name, out_ds_name):
+    llr_ood = load_best_llr(in_ds_name, out_ds_name)
+    odin_ood = load_best_odin(cls_type, in_ds_name, out_ds_name)
+    mahalanobis_ood = load_best_mahalanobis_ood(cls_type, in_ds_name, out_ds_name)
+
+    ood_detectors = [
+        (f'ODIN OOD {out_ds_name}', odin_ood),
+        (f'Mahalanobis OOD {out_ds_name}', mahalanobis_ood),
+        (f'LLR OOD {out_ds_name}', llr_ood),
+    ]
+    return ood_detectors
+
+
+def load_adv_detectors(cls_type, ds_name, adv_attack):
+    lid_adv = load_best_lid(cls_type, ds_name, adv_attack)
+    mahalanobis_adv = load_best_mahalanobis_adv(cls_type, ds_name, adv_attack)
+
+    adv_detectors = [
+        (f'LID Adv {adv_attack}', lid_adv),
+        (f'Mahalanobis Adv {adv_attack}', mahalanobis_adv),
+    ]
+    return adv_detectors

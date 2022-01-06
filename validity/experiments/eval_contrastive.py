@@ -11,6 +11,10 @@ from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, rec
 from validity.adv_dataset import load_adv_dataset
 from validity.datasets import load_datasets
 from validity.detectors.load import load_detectors
+from validity.detectors.lid import LIDDetector
+from validity.detectors.llr import LikelihoodRatioDetector
+from validity.detectors.mahalanobis import MahalanobisDetector
+from validity.detectors.odin import ODINDetector
 from validity.util import np_loader, NPZDataset
 
 
