@@ -101,13 +101,14 @@ def _make_contrastive_dataset_job(contrastive_type,
                               target_label,
                               z_start=encoded_data,
                               **kwargs)
+                examples.append(x_hat.cpu().detach().numpy())
+                example_labels.append(tiled_label.numpy())
         elif contrastive_type == 'cdeepex':
             n = data.size(0)
             tiled_data = data.repeat_interleave(num_labels - 1, dim=0)
             tiled_encoded = encoded_data.repeat_interleave(num_labels - 1, dim=0)
 
             y_true = classifier(data.cuda()).argmax(-1)
-            print(f'{y_true=}')
             tiled_target = torch.tensor([[i for i in range(num_labels) if i != y_true[j]]
                                          for j in range(n)])
             tiled_target = tiled_target.reshape(-1)
@@ -121,7 +122,7 @@ def _make_contrastive_dataset_job(contrastive_type,
                             **kwargs)
 
             examples.append(x_hat.cpu().detach().numpy())
-            example_labels.append(target_label.numpy())
+            example_labels.append(tiled_target.numpy())
 
     examples = np.concatenate(examples)
     example_labels = np.concatenate(example_labels)
