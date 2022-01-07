@@ -63,6 +63,7 @@ def _make_contrastive_dataset_job(contrastive_type,
                                   generator_weights_path,
                                   shard_idx,
                                   shards,
+                                  batch_size=1,
                                   data_root='./datasets/',
                                   cuda_idx=0,
                                   seed=1,
@@ -80,7 +81,7 @@ def _make_contrastive_dataset_job(contrastive_type,
     shard_lower = (n * shard_idx) // shards
     shard_upper = (n * (shard_idx + 1)) // shards
     zip_ds = torch.utils.data.Subset(zip_ds, range(shard_lower, shard_upper))
-    zip_loader = torch.utils.data.DataLoader(zip_ds, batch_size=1, shuffle=False)
+    zip_loader = torch.utils.data.DataLoader(zip_ds, batch_size=batch_size, shuffle=False)
 
     classifier = load_cls(classifier_net_type, classifier_weights_path, dataset)
     classifier.eval()

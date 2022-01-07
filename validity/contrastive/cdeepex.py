@@ -94,8 +94,10 @@ def cdeepex(generator,
     best_loss = None
     outer_step = torch.zeros(n).cuda()
     steps_since_best_loss = torch.zeros(n).cuda()
+    pbar = tqdm()
 
     for i in range(outer_iters * inner_iters):
+        pbar.update(1)
         optimizer.zero_grad()
 
         obj = (z - z_0).norm(dim=-1)
@@ -137,35 +139,39 @@ def cdeepex(generator,
             steps_since_best_loss[idx] = 0
             best_loss[idx] = float("Inf")
 
-        # Get only necessary subsets of tensors to evaluate
-        # s_z = z[update_idx]
-        # s_lam = lam[update_idx]
-        # s_c = c[update_idx]
-        # s_y_true = y_true[update_idx]
-        # s_y_probe = y_probe[update_idx]
-        # s_y_prime_idx = y_prime_idx[update_idx]
-        # s_mu_1 = mu_1[update_idx]
-        # s_mu_2 = mu_2[update_idx]
+        # Get only necessary subsets of tensors to update outer
+        # iteration parameters
+        s_z = z[update_idx]
+        s_old_z = old_z[update_idx]
+        s_lam = lam[update_idx]
+        s_c = c[update_idx]
+        s_y_true = y_true[update_idx]
+        s_y_probe = y_probe[update_idx]
+        s_y_prime_idx = y_prime_idx[update_idx]
+        s_mu_1 = mu_1[update_idx]
+        s_mu_2 = mu_2[update_idx]
+        s_c = c[update_idx]
 
         # Update outer iteration parameters
-        n_lam = lam + c * h(z, y_true, y_probe).squeeze(-1)
-        vals = mu_1 + c.unsqueeze(-1) * h(z, y_true, y_prime_idx)
+        n_lam = s_lam + s_c * h(s_z, s_y_true, s_y_probe).squeeze(-1)
+        vals = s_mu_1 + s_c.unsqueeze(-1) * h(s_z, s_y_true, s_y_prime_idx)
         n_mu_1 = torch.maximum(torch.zeros_like(vals).cuda(), vals)
-        vals = mu_2 + c.unsqueeze(-1) * h(z, y_probe, y_prime_idx)
+        vals = s_mu_2 + s_c.unsqueeze(-1) * h(s_z, s_y_probe, s_y_prime_idx)
         n_mu_2 = torch.maximum(torch.zeros_like(vals).cuda(), vals)
-        n_c = c * torch.where(
-            h(z, y_true, y_probe) > gamma * h(old_z, y_true, y_probe), beta, 1.).squeeze(-1)
-
-        lam = torch.where(updates, n_lam, lam).detach()
-        c = torch.where(updates, n_c, c).detach()
-        for idx in torch.where(updates):
-            mu_1[idx] = n_mu_1[idx].detach()
-            mu_2[idx] = n_mu_2[idx].detach()
+        n_c = s_c * torch.where(
+            h(s_z, s_y_true, s_y_probe) > gamma * h(s_old_z, s_y_true, s_y_probe), beta,
+            1.).squeeze(-1)
 
         del_x = generator.decode(z) - generator.decode(old_z)
         del_x_norm = del_x.norm(p=2, dim=(1, 2, 3))
-        for idx in torch.where(updates)[0]:
+
+        for j, idx in enumerate(update_idx):
             old_z[idx] = z[idx].detach()
+
+            lam[idx] = n_lam[j].detach()
+            c[idx] = n_c[j].detach()
+            mu_1[idx] = n_mu_1[j].detach()
+            mu_2[idx] = n_mu_2[j].detach()
 
         logits = classifier(generator.decode(z))
 
@@ -190,9 +196,9 @@ def cdeepex(generator,
 
         print(f'step: {i} min loss: {float(loss.mean()):.4f} '
               f'del x: {float(del_x_norm.mean()):.4f} '
-              f'updates: {list(torch.where(updates)[0].cpu().detach().numpy())}')
+              f'updates: {list(update_idx.cpu().detach().numpy())}')
 
-        # Calculated outer steps under threshold for exiting optimization
+        # Calculate outer steps under threshold for exiting optimization
         updated_steps = torch.where(torch.logical_and(del_x_norm < del_x_threshold, updates),
                                     steps_under_threshold + 1,
                                     torch.tensor(0.).cuda())
@@ -232,6 +238,7 @@ def cdeepex(generator,
 
         optimizer = optim.SGD([z], lr=1e-3)
 
+    pbar.close()
     z = torch.stack(z_res)
 
     return generator.decode(z)
@@ -242,6 +249,7 @@ def run_cdeepex(dataset,
                 classifier_weights_path,
                 generator_net_type,
                 generator_weights_path,
+                batch_size=32,
                 data_root='./datasets/',
                 cuda_idx=0,
                 seed=0):
@@ -262,7 +270,7 @@ def run_cdeepex(dataset,
 
     # data, label = next(iter(in_test_loader))
 
-    data, label = zip(*[test_ds[i] for i in range(128)])
+    data, label = zip(*[test_ds[i] for i in range(batch_size)])
     data = torch.stack(data)
     label = torch.tensor(label)
     target_label = (label + 1) % 10
@@ -271,8 +279,9 @@ def run_cdeepex(dataset,
     print('target label', target_label)
 
     z_start = generator.encode(data.cuda()).clone().detach()
-    start = time.time()
     writer = SummaryWriter()
+    start = time.time()
+    print('Starting cdeepex')
     x_hat = cdeepex(generator,
                     classifier,
                     data,
