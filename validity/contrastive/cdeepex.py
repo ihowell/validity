@@ -64,6 +64,8 @@ def cdeepex(generator,
     y_true = classifier(x_start).argmax(-1)
     y_probe = y_probe.cuda()
 
+    assert torch.where(y_true == y_probe)[0].size(0) == 0
+
     active_indices = torch.arange(n).cuda()
 
     c = torch.tensor([1.] * n).cuda()
@@ -73,9 +75,9 @@ def cdeepex(generator,
     beta = 1.01
     gamma = 0.24
 
-    y_prime_idx = torch.tensor(
-        [[i for i in range(num_classes) if i not in [y_true[j], y_probe[j]]]
-         for j in range(n)]).cuda()
+    y_prime_idx = [[i for i in range(num_classes) if i not in [y_true[j], y_probe[j]]]
+                   for j in range(n)]
+    y_prime_idx = torch.tensor(y_prime_idx).cuda()
 
     def h(z, y_1, y_2):
         img = generator.decode(z)
@@ -94,10 +96,8 @@ def cdeepex(generator,
     best_loss = None
     outer_step = torch.zeros(n).cuda()
     steps_since_best_loss = torch.zeros(n).cuda()
-    pbar = tqdm()
 
     for i in range(outer_iters * inner_iters):
-        pbar.update(1)
         optimizer.zero_grad()
 
         obj = (z - z_0).norm(dim=-1)
@@ -238,7 +238,6 @@ def cdeepex(generator,
 
         optimizer = optim.SGD([z], lr=1e-3)
 
-    pbar.close()
     z = torch.stack(z_res)
 
     return generator.decode(z)
