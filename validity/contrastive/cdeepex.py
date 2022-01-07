@@ -34,6 +34,7 @@ def cdeepex(generator,
             writer=None,
             z_start=None,
             inner_iters=10000,
+            inner_patience=100,
             outer_iters=10000,
             tb_writer=None,
             strategy=None,
@@ -87,51 +88,89 @@ def cdeepex(generator,
         vals = torch.stack(vals)
         return vals
 
-    steps_under_threshold = [0] * n
-    for i in range(outer_iters):
-        old_z = z.clone().detach()
-        early_stopping = EarlyStopping(patience=100, verbose=False)
-        optimizer = optim.SGD([z], lr=1e-3)
-        for j in range(inner_iters):
-            optimizer.zero_grad()
+    optimizer = optim.SGD([z], lr=1e-3)
+    steps_under_threshold = torch.zeros(n).cuda()
+    old_z = z.clone().detach()
+    best_loss = None
+    outer_step = torch.zeros(n).cuda()
+    steps_since_best_loss = torch.zeros(n).cuda()
 
-            obj = (z - z_0).norm(dim=-1)
-            probe = lam * h(z, y_true, y_probe).squeeze(-1) + c / 2 * h(
-                z, y_true, y_probe).norm(p=2, dim=-1)
+    for i in range(outer_iters * inner_iters):
+        optimizer.zero_grad()
 
-            vals = mu_1 + c.unsqueeze(-1) * h(z, y_true, y_prime_idx)
-            constraint_1 = (torch.maximum(torch.zeros_like(vals).cuda(), vals).square() -
-                            mu_1.square())
-            constraint_1 = 1 / (2 * c) * constraint_1.sum(dim=1)
+        obj = (z - z_0).norm(dim=-1)
+        probe = lam * h(z, y_true, y_probe).squeeze(-1) + c / 2 * h(z, y_true, y_probe).norm(
+            p=2, dim=-1)
 
-            vals = mu_2 + c.unsqueeze(-1) * h(z, y_probe, y_prime_idx)
-            constraint_2 = (torch.maximum(torch.zeros_like(vals).cuda(), vals).square() -
-                            mu_2.square())
-            constraint_2 = 1 / (2 * c) * constraint_2.sum(dim=1)
-
-            loss = obj + probe + constraint_1 + constraint_2
-            loss = loss.mean()
-
-            loss.backward()
-            optimizer.step()
-            if early_stopping(loss.mean()):
-                break
-
-        lam = (lam + c * h(z, y_true, y_probe).squeeze(-1)).detach()
         vals = mu_1 + c.unsqueeze(-1) * h(z, y_true, y_prime_idx)
-        mu_1 = torch.maximum(torch.zeros_like(vals).cuda(), vals).detach()
+        constraint_1 = (torch.maximum(torch.zeros_like(vals).cuda(), vals).square() -
+                        mu_1.square())
+        constraint_1 = 1 / (2 * c) * constraint_1.sum(dim=1)
+
         vals = mu_2 + c.unsqueeze(-1) * h(z, y_probe, y_prime_idx)
-        mu_2 = torch.maximum(torch.zeros_like(vals).cuda(), vals).detach()
-        c = c * torch.where(
+        constraint_2 = (torch.maximum(torch.zeros_like(vals).cuda(), vals).square() -
+                        mu_2.square())
+        constraint_2 = 1 / (2 * c) * constraint_2.sum(dim=1)
+
+        loss = obj + probe + constraint_1 + constraint_2
+        loss.mean().backward()
+        optimizer.step()
+
+        if best_loss is None:
+            best_loss = loss.detach()
+        else:
+            improved_loss = torch.where(best_loss > 0., 0.995 * best_loss, best_loss - 0.005)
+            steps_since_best_loss = torch.where(loss < improved_loss,
+                                                torch.tensor(0.).cuda(),
+                                                steps_since_best_loss + 1)
+            best_loss = torch.where(loss < improved_loss, loss, best_loss)
+
+        updates = torch.logical_or(steps_since_best_loss >= inner_patience,
+                                   steps_since_best_loss >= inner_iters)
+        if not updates.any():
+            continue
+
+        update_idx = torch.where(updates)[0]
+
+        # Reset counters for updates
+        for idx in update_idx:
+            steps_since_best_loss[idx] = 0
+            best_loss[idx] = float("Inf")
+
+        # Get only necessary subsets of tensors to evaluate
+        # s_z = z[update_idx]
+        # s_lam = lam[update_idx]
+        # s_c = c[update_idx]
+        # s_y_true = y_true[update_idx]
+        # s_y_probe = y_probe[update_idx]
+        # s_y_prime_idx = y_prime_idx[update_idx]
+        # s_mu_1 = mu_1[update_idx]
+        # s_mu_2 = mu_2[update_idx]
+
+        # Update outer iteration parameters
+        n_lam = lam + c * h(z, y_true, y_probe).squeeze(-1)
+        vals = mu_1 + c.unsqueeze(-1) * h(z, y_true, y_prime_idx)
+        n_mu_1 = torch.maximum(torch.zeros_like(vals).cuda(), vals)
+        vals = mu_2 + c.unsqueeze(-1) * h(z, y_probe, y_prime_idx)
+        n_mu_2 = torch.maximum(torch.zeros_like(vals).cuda(), vals)
+        n_c = c * torch.where(
             h(z, y_true, y_probe) > gamma * h(old_z, y_true, y_probe), beta, 1.).squeeze(-1)
+
+        lam = torch.where(updates, n_lam, lam).detach()
+        c = torch.where(updates, n_c, c).detach()
+        for idx in torch.where(updates):
+            mu_1[idx] = n_mu_1[idx].detach()
+            mu_2[idx] = n_mu_2[idx].detach()
 
         del_x = generator.decode(z) - generator.decode(old_z)
         del_x_norm = del_x.norm(p=2, dim=(1, 2, 3))
+        for idx in torch.where(updates)[0]:
+            old_z[idx] = z[idx].detach()
 
         logits = classifier(generator.decode(z))
 
         if writer:
-            writer.add_scalar('cdeepex/loss', loss, i)
+            writer.add_scalar('cdeepex/loss', loss.mean(), i)
             writer.add_scalar('cdeepex/obj', obj.mean(), i)
             writer.add_scalar('cdeepex/probe', probe.mean(), i)
             writer.add_scalar('cdeepex/constraint_1', constraint_1.mean(), i)
@@ -149,35 +188,49 @@ def cdeepex(generator,
             img = torch.cat([x_start, generator.decode(z_0), generator.decode(z)], 3)
             writer.add_images('cdeepex/example', torch.tensor(img), i)
 
-        print(f'step: {i} inner_steps: {j} min loss: {float(loss.mean()):.4f} '
-              f'del x: {float(del_x_norm.mean()):.4f}')
+        print(f'step: {i} min loss: {float(loss.mean()):.4f} '
+              f'del x: {float(del_x_norm.mean()):.4f} '
+              f'updates: {list(torch.where(updates)[0].cpu().detach().numpy())}')
 
-        for i in reversed(range(del_x_norm.size(0))):
-            if del_x_norm[i] < del_x_threshold:
-                steps_under_threshold[i] += 1
-                if steps_under_threshold[i] >= del_x_patience:
-                    print(f'Storing {i}')
-                    # Store result
-                    z_res[int(active_indices[i])] = z[i].clone().detach()
+        # Calculated outer steps under threshold for exiting optimization
+        updated_steps = torch.where(torch.logical_and(del_x_norm < del_x_threshold, updates),
+                                    steps_under_threshold + 1,
+                                    torch.tensor(0.).cuda())
+        steps_under_threshold = torch.where(updates, updated_steps, steps_under_threshold)
 
-                    z = torch.cat([z[:i], z[i + 1:]]).detach()
-                    active_indices = torch.cat([active_indices[:i],
-                                                active_indices[i + 1:]]).detach()
-                    z_0 = torch.cat([z_0[:i], z_0[i + 1:]]).detach()
-                    del_z_0 = torch.cat([del_z_0[:i], del_z_0[i + 1:]]).detach()
-                    y_true = torch.cat([y_true[:i], y_true[i + 1:]]).detach()
-                    y_probe = torch.cat([y_probe[:i], y_probe[i + 1:]]).detach()
-                    y_prime_idx = torch.cat([y_prime_idx[:i], y_prime_idx[i + 1:]]).detach()
-                    lam = torch.cat([lam[:i], lam[i + 1:]]).detach()
-                    mu_1 = torch.cat([mu_1[:i], mu_1[i + 1:]]).detach()
-                    mu_2 = torch.cat([mu_2[:i], mu_2[i + 1:]]).detach()
-                    c = torch.cat([c[:i], c[i + 1:]]).detach()
-                    x_start = torch.cat([x_start[:i], x_start[i + 1:]]).detach()
-            else:
-                steps_under_threshold[i] = 0
+        idx_to_remove = torch.where(steps_under_threshold >= del_x_patience)[0]
 
-        if active_indices.size(0) == 0:
+        if idx_to_remove.size(0) == 0:
+            continue
+
+        for i in idx_to_remove:
+            print(f'Storing {int(active_indices[i])}')
+            z_res[int(active_indices[i])] = z[i].clone().detach()
+
+        idx_to_keep = torch.tensor([i for i in range(n) if i not in idx_to_remove]).cuda()
+        n = idx_to_keep.size(0)
+        if idx_to_keep.size(0) == 0:
             break
+
+        z = z[idx_to_keep].detach()
+        active_indices = active_indices[idx_to_keep].detach()
+        z_0 = z_0[idx_to_keep].detach()
+        del_z_0 = del_z_0[idx_to_keep].detach()
+        y_true = y_true[idx_to_keep].detach()
+        y_probe = y_probe[idx_to_keep].detach()
+        y_prime_idx = y_prime_idx[idx_to_keep].detach()
+        lam = lam[idx_to_keep].detach()
+        mu_1 = mu_1[idx_to_keep].detach()
+        mu_2 = mu_2[idx_to_keep].detach()
+        c = c[idx_to_keep].detach()
+        x_start = x_start[idx_to_keep].detach()
+        steps_under_threshold = steps_under_threshold[idx_to_keep].detach()
+        old_z = old_z[idx_to_keep].detach()
+        best_loss = best_loss[idx_to_keep].detach()
+        outer_step = outer_step[idx_to_keep].detach()
+        steps_since_best_loss = steps_since_best_loss[idx_to_keep].detach()
+
+        optimizer = optim.SGD([z], lr=1e-3)
 
     z = torch.stack(z_res)
 
