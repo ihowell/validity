@@ -22,7 +22,7 @@ def make_contrastive_dataset(contrastive_type,
                              generator_net_type,
                              generator_weights_path,
                              shards=20,
-                             class_coef=5.0,
+                             batch_size=1,
                              data_root='./datasets/',
                              cuda_idx=0,
                              seed=1,
@@ -37,7 +37,7 @@ def make_contrastive_dataset(contrastive_type,
                 executor.submit(_make_contrastive_dataset_job, contrastive_type, dataset,
                                 classifier_net_type, classifier_weights_path,
                                 generator_net_type, generator_weights_path, i, shards,
-                                data_root, cuda_idx, seed, **kwargs))
+                                batch_size, data_root, cuda_idx, seed, **kwargs))
     [job.result() for job in jobs]
 
     examples = []
