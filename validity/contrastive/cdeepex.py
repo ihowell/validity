@@ -94,7 +94,8 @@ def cdeepex(generator,
     steps_under_threshold = torch.zeros(n).cuda()
     old_z = z.clone().detach()
     best_loss = None
-    outer_step = torch.zeros(n).cuda()
+    inner_steps = torch.zeros(n).cuda()
+    outer_steps = torch.zeros(n).cuda()
     steps_since_best_loss = torch.zeros(n).cuda()
 
     for i in range(outer_iters * inner_iters):
@@ -127,8 +128,11 @@ def cdeepex(generator,
                                                 steps_since_best_loss + 1)
             best_loss = torch.where(loss < improved_loss, loss, best_loss)
 
+        # TODO: Fix the bottom test. It should be tracking the total
+        # number of inner steps.
         updates = torch.logical_or(steps_since_best_loss >= inner_patience,
-                                   steps_since_best_loss >= inner_iters)
+                                   inner_steps >= inner_iters)
+        inner_steps += 1
         if not updates.any():
             continue
 
@@ -136,6 +140,8 @@ def cdeepex(generator,
 
         # Reset counters for updates
         for idx in update_idx:
+            outer_steps[idx] += 1
+            inner_steps[idx] = 0
             steps_since_best_loss[idx] = 0
             best_loss[idx] = float("Inf")
 
@@ -204,7 +210,9 @@ def cdeepex(generator,
                                     torch.tensor(0.).cuda())
         steps_under_threshold = torch.where(updates, updated_steps, steps_under_threshold)
 
-        idx_to_remove = torch.where(steps_under_threshold >= del_x_patience)[0]
+        idx_to_remove = torch.where(
+            torch.logical_or(steps_under_threshold >= del_x_patience,
+                             outer_steps >= outer_iters))[0]
 
         if idx_to_remove.size(0) == 0:
             continue
@@ -233,7 +241,8 @@ def cdeepex(generator,
         steps_under_threshold = steps_under_threshold[idx_to_keep].detach()
         old_z = old_z[idx_to_keep].detach()
         best_loss = best_loss[idx_to_keep].detach()
-        outer_step = outer_step[idx_to_keep].detach()
+        inner_steps = outer_steps[idx_to_keep].detach()
+        outer_steps = outer_steps[idx_to_keep].detach()
         steps_since_best_loss = steps_since_best_loss[idx_to_keep].detach()
 
         optimizer = optim.SGD([z], lr=1e-3)
