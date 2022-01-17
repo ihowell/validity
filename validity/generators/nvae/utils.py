@@ -58,7 +58,9 @@ class DummyDDP(nn.Module):
 
 
 def count_parameters_in_M(model):
-    return np.sum(np.prod(v.size()) for name, v in model.named_parameters() if "auxiliary" not in name) / 1e6
+    return np.sum(
+        np.prod(v.size())
+        for name, v in model.named_parameters() if "auxiliary" not in name) / 1e6
 
 
 def save_checkpoint(state, is_best, save):
@@ -99,7 +101,10 @@ class Logger(object):
         self.rank = rank
         if self.rank == 0:
             log_format = '%(asctime)s %(message)s'
-            logging.basicConfig(stream=sys.stdout, level=logging.INFO, format=log_format, datefmt='%m/%d %I:%M:%S %p')
+            logging.basicConfig(stream=sys.stdout,
+                                level=logging.INFO,
+                                format=log_format,
+                                datefmt='%m/%d %I:%M:%S %p')
             fh = logging.FileHandler(os.path.join(save, 'log.txt'))
             fh.setFormatter(logging.Formatter(log_format))
             logging.getLogger().addHandler(fh)
@@ -180,17 +185,23 @@ def get_cout(cin, stride):
 
 def kl_balancer_coeff(num_scales, groups_per_scale, fun):
     if fun == 'equal':
-        coeff = torch.cat([torch.ones(groups_per_scale[num_scales - i - 1]) for i in range(num_scales)], dim=0).cuda()
+        coeff = torch.cat(
+            [torch.ones(groups_per_scale[num_scales - i - 1]) for i in range(num_scales)],
+            dim=0).cuda()
     elif fun == 'linear':
-        coeff = torch.cat([(2**i) * torch.ones(groups_per_scale[num_scales - i - 1]) for i in range(num_scales)],
+        coeff = torch.cat([(2**i) * torch.ones(groups_per_scale[num_scales - i - 1])
+                           for i in range(num_scales)],
                           dim=0).cuda()
     elif fun == 'sqrt':
-        coeff = torch.cat([np.sqrt(2**i) * torch.ones(groups_per_scale[num_scales - i - 1]) for i in range(num_scales)],
+        coeff = torch.cat([
+            np.sqrt(2**i) * torch.ones(groups_per_scale[num_scales - i - 1])
+            for i in range(num_scales)
+        ],
                           dim=0).cuda()
     elif fun == 'square':
         coeff = torch.cat([
-            np.square(2**i) / groups_per_scale[num_scales - i - 1] * torch.ones(groups_per_scale[num_scales - i - 1])
-            for i in range(num_scales)
+            np.square(2**i) / groups_per_scale[num_scales - i - 1] *
+            torch.ones(groups_per_scale[num_scales - i - 1]) for i in range(num_scales)
         ],
                           dim=0).cuda()
     else:
@@ -250,7 +261,6 @@ def reconstruction_loss(decoder, x, crop=False):
     if isinstance(decoder, DiscMixLogistic):
         return -torch.sum(recon, dim=[1, 2])  # summation over RGB is done.
     else:
-        print(f'{recon.shape=}')
         return -torch.sum(recon, dim=[1, 2, 3])
 
 
@@ -305,7 +315,8 @@ def num_output(dataset):
         return 28 * 28
     elif dataset == 'cifar10':
         return 3 * 32 * 32
-    elif dataset.startswith('celeba') or dataset.startswith('imagenet') or dataset.startswith('lsun'):
+    elif dataset.startswith('celeba') or dataset.startswith('imagenet') or dataset.startswith(
+            'lsun'):
         size = int(dataset.split('_')[-1])
         return 3 * size * size
     elif dataset == 'ffhq':
@@ -319,7 +330,8 @@ def get_input_size(dataset):
         return 32
     elif dataset == 'cifar10':
         return 32
-    elif dataset.startswith('celeba') or dataset.startswith('imagenet') or dataset.startswith('lsun'):
+    elif dataset.startswith('celeba') or dataset.startswith('imagenet') or dataset.startswith(
+            'lsun'):
         size = int(dataset.split('_')[-1])
         return size
     elif dataset == 'ffhq':
@@ -474,7 +486,11 @@ def get_arch_cells(arch_type):
     return arch_cells
 
 
-def groups_per_scale(num_scales, num_groups_per_scale, is_adaptive, divider=2, minimum_groups=1):
+def groups_per_scale(num_scales,
+                     num_groups_per_scale,
+                     is_adaptive,
+                     divider=2,
+                     minimum_groups=1):
     g = []
     n = num_groups_per_scale
     for s in range(num_scales):

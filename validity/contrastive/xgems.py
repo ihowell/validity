@@ -74,8 +74,6 @@ def xgems(generator,
         logits = classifier(x)
         decode_loss = torch.mean((x_start - x)**2, (1, 2, 3))
 
-        print(f'{logits=}')
-        print(f'{y_target=}')
         class_loss = criterion(logits, y_target.cuda())
         # loss = class_loss
         loss = decode_loss + class_coef * class_loss

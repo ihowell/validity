@@ -40,15 +40,15 @@ def construct_example(dataset, attack, net_type, weights_location, data_root='./
         logits = network(data)
         adv_logits = network(adv_data)
 
-        print(f'{label=}')
-        print(f'{logits.argmax(axis=1)=}')
-        print(f'{adv_logits.argmax(axis=1)=}')
+        # print(f'{label=}')
+        # print(f'{logits.argmax(axis=1)=}')
+        # print(f'{adv_logits.argmax(axis=1)=}')
         logits = logits.sort()[0]
         adv_logits = adv_logits.sort()[0]
         marginal = logits[:, -1] - logits[:, -2]
         adv_marginal = adv_logits[:, -1] - adv_logits[:, -2]
-        print(f'{marginal=}')
-        print(f'{adv_marginal=}')
+        # print(f'{marginal=}')
+        # print(f'{adv_marginal=}')
 
         data = data.cpu().detach().numpy()
         adv_data = adv_data.cpu().detach().numpy()
