@@ -278,7 +278,7 @@ def cdeepex(generator,
                                                               == 0.).all()
 
                 if valid_sat and eq_con_sat and ineq_con_1_sat and ineq_con_2_sat:
-                    print(f'feasible lam: {lam[idx]} {i=} {outer_steps[idx]=}')
+                    # print(f'feasible lam: {lam[idx]} {i=} {outer_steps[idx]=}')
                     img = torch.cat([x_start, x_temp], 3)
                     writer[idx].add_image('cdeepex/feasible', img[idx], outer_steps[idx])
 
@@ -426,9 +426,9 @@ def run_cdeepex(dataset,
                     z_start=z_start)
     finish = time.time()
     print(f'Completion time {finish-start:.1f} sec')
-    print(f'{target_label=}')
+    # print(f'{target_label=}')
     pred_labels = classifier(x_hat).argmax(dim=-1)
-    print(f'{pred_labels=}')
+    # print(f'{pred_labels=}')
 
     img = x_hat.cpu().detach()
     img = torch.cat([data, img], 3)[0].numpy()
