@@ -285,7 +285,7 @@ def train(beta=1.,
 
 
 def train_multiple_bg(mutation_rates, **kwargs):
-    print(f'{kwargs=}')
+    #print(f'{kwargs=}')
     for mutation_rate in mutation_rates:
         train(mutation_rate=mutation_rate, **kwargs)
 
