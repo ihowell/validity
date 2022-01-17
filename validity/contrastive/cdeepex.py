@@ -374,12 +374,13 @@ def run_cdeepex(dataset,
                 seed=0,
                 all_labels=False,
                 id=None,
-                target_label=None):
+                target_label=None,
+                encode_dir=None):
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     _, test_ds = load_datasets(dataset)
-    encoded_test_ds = load_encoded_ds(dataset, generator_net_type)
+    encoded_test_ds = load_encoded_ds(dataset, generator_net_type, encode_dir=encode_dir)
     loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False)
     encode_loader = torch.utils.data.DataLoader(encoded_test_ds,
                                                 batch_size=batch_size,

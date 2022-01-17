@@ -37,5 +37,7 @@ def load_gen(gen_type, weights_path, dataset):
     return generator
 
 
-def load_encoded_ds(dataset, gen_type):
-    return NPZDataset(f'data/{gen_type}_encode_{dataset}_test.npz')
+def load_encoded_ds(dataset, gen_type, encode_dir=None):
+    if encode_dir is None:
+        encode_dir = 'data'
+    return NPZDataset(f'{encode_dir}/{gen_type}_encode_{dataset}_test.npz')
