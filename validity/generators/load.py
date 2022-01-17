@@ -7,7 +7,12 @@ from .nvae.model import load_nvae
 from .wgan_gp import WGAN_GP
 
 
-def load_gen(gen_type, weights_path):
+def load_gen(gen_type, weights_path, dataset):
+    if dataset == 'mnist':
+        num_channels = 1
+    elif dataset == 'fmnist':
+        num_channels = 1
+
     if gen_type == 'mnist_vae':
         generator = MnistVAE()
         generator.load_state_dict(torch.load(weights_path))
@@ -25,7 +30,7 @@ def load_gen(gen_type, weights_path):
             return generator.decoder_output(logits).sample(), log_p
 
     elif gen_type == 'wgan_gp':
-        generator = WGAN_GP()
+        generator = WGAN_GP(num_channels=num_channels)
         generator.load_state_dict(torch.load(weights_path))
 
     generator = generator.cuda()

@@ -9,6 +9,7 @@ from torchvision import datasets, transforms
 from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
 
 from validity.adv_dataset import load_adv_dataset
+from validity.classifiers import load_cls
 from validity.datasets import load_datasets
 from validity.detectors.load import load_detectors
 from validity.detectors.lid import LIDDetector
@@ -20,6 +21,7 @@ from validity.util import np_loader, NPZDataset
 
 def main(contrastive_ds_path,
          cls_type,
+         cls_weights_path,
          in_ds_name,
          out_ds_name,
          adv_attack,
@@ -38,6 +40,15 @@ def main(contrastive_ds_path,
                                                   cls_type,
                                                   adv_attack,
                                                   adv_step=adv_step)
+
+    cls = load_cls(cls_type, cls_weights_path, in_ds_name)
+    print(f'Evaluating on classifier:')
+    cls_preds = []
+    for data, labels in tqdm(loader):
+        cls_preds.append(
+            torch.where(cls(data.cuda()).argmax(-1) == labels.cuda(), 1.,
+                        0.).cpu().detach().numpy())
+    cls_preds = np.concatenate(cls_preds)
 
     # Evaluate all on ood datasets
     print(f'Evaluating on {len(ood_detectors)} ood detectors:')
@@ -62,13 +73,14 @@ def main(contrastive_ds_path,
     for ood_name, ood_pred in ood_preds.items():
         results[ood_name] = {}
         for adv_name, adv_pred in adv_preds.items():
-            valid = 1. - np.logical_or(ood_pred, adv_pred).mean()
+            valid = 1. - np.logical_or(np.logical_or(ood_pred, adv_pred), cls_preds
+                                       == 0.).mean()
             results[ood_name][adv_name] = valid
 
     # Print results
     print('Adv Step optimization:', adv_step)
     print('')
-    print('% Valid:')
+    print(f'% Initial Valid: {float(cls_preds.mean()):.4f}')
     result_table = [['', ''], ['', '']]
 
     for adv_name, _ in adv_detectors:

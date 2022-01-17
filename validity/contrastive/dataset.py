@@ -26,6 +26,7 @@ def make_contrastive_dataset(contrastive_type,
                              data_root='./datasets/',
                              cuda_idx=0,
                              seed=1,
+                             dry_run_size=None,
                              **kwargs):
     assert contrastive_type in ['xgems', 'cdeepex']
 
@@ -37,7 +38,7 @@ def make_contrastive_dataset(contrastive_type,
                 executor.submit(_make_contrastive_dataset_job, contrastive_type, dataset,
                                 classifier_net_type, classifier_weights_path,
                                 generator_net_type, generator_weights_path, i, shards,
-                                batch_size, data_root, cuda_idx, seed, **kwargs))
+                                batch_size, data_root, cuda_idx, seed, dry_run_size, **kwargs))
     [job.result() for job in jobs]
 
     examples = []
@@ -67,14 +68,20 @@ def _make_contrastive_dataset_job(contrastive_type,
                                   data_root='./datasets/',
                                   cuda_idx=0,
                                   seed=1,
+                                  dry_run_size=None,
                                   **kwargs):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
     num_labels = 10
 
-    encoded_test_ds = load_encoded_ds(dataset, generator_net_type)
     _, test_ds = load_datasets(dataset)
+    encoded_test_ds = load_encoded_ds(dataset, generator_net_type)
+
+    if dry_run_size:
+        test_ds = torch.utils.data.Subset(test_ds, range(dry_run_size))
+        encoded_test_ds = torch.utils.data.Subset(encoded_test_ds, range(dry_run_size))
+
     zip_ds = ZipDataset(test_ds, encoded_test_ds)
 
     n = len(zip_ds)
@@ -86,7 +93,7 @@ def _make_contrastive_dataset_job(contrastive_type,
     classifier = load_cls(classifier_net_type, classifier_weights_path, dataset)
     classifier.eval()
 
-    generator = load_gen(generator_net_type, generator_weights_path)
+    generator = load_gen(generator_net_type, generator_weights_path, dataset)
     generator.eval()
 
     examples = []

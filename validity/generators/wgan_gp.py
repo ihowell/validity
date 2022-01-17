@@ -19,7 +19,7 @@ from validity.util import EarlyStopping, loop_gen, get_executor
 
 
 class WGAN_GP(nn.Module):
-    def __init__(self, critic_iter=5, lambda_term=10):
+    def __init__(self, critic_iter=5, lambda_term=10, num_channels=3):
         super().__init__()
         self.critic_iter = critic_iter
         self.lambda_term = lambda_term
@@ -35,12 +35,12 @@ class WGAN_GP(nn.Module):
             nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
             nn.ReLU(True),
             # 64x14x14
-            nn.ConvTranspose2d(64, 1, 4, stride=2, padding=1),
+            nn.ConvTranspose2d(64, num_channels, 4, stride=2, padding=1),
             nn.Sigmoid(),
         )
 
         self.discriminator = nn.Sequential(
-            nn.Conv2d(1, 64, 5, stride=2, padding=1),
+            nn.Conv2d(num_channels, 64, 5, stride=2, padding=1),
             nn.LeakyReLU(0.2, inplace=True),
             # 64x14x14
             nn.Conv2d(64, 128, 5, stride=2, padding=1),
@@ -150,8 +150,15 @@ class WGAN_GP(nn.Module):
         }
 
 
-def train(generator_iters=200000, batch_size=64, data_root='./datasets/', cuda_idx=0):
-    gan = WGAN_GP()
+def train(dataset, generator_iters=200000, batch_size=64, data_root='./datasets/', cuda_idx=0):
+    if dataset == 'mnist':
+        num_channels = 1
+    elif dataset == 'fmnist':
+        num_channels = 1
+    elif dataset == 'cifar10':
+        num_channels = 3
+
+    gan = WGAN_GP(num_channels=num_channels)
     gan = gan.cuda()
     gan.train()
 
@@ -159,7 +166,7 @@ def train(generator_iters=200000, batch_size=64, data_root='./datasets/', cuda_i
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
     train_loader = loop_gen(train_loader)
 
-    save_name = f'mnist2'
+    save_name = f'mnist'
     writer = SummaryWriter('gan/' + save_name)
     save_path = f'gan/{save_name}.pt'
 

@@ -90,7 +90,11 @@ def test():
     print(y.size())
 
 
-def train_network(max_epochs=1000, data_root='./datasets/', cuda_idx=0, batch_size=64):
+def train_network(max_epochs=1000,
+                  data_root='./datasets/',
+                  cuda_idx=0,
+                  batch_size=64,
+                  l2_reg=None):
     net = MnistClassifier()
     net = net.cuda()
     train_set, test_set = load_datasets('mnist')
@@ -102,7 +106,7 @@ def train_network(max_epochs=1000, data_root='./datasets/', cuda_idx=0, batch_si
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(net.parameters())
 
-    early_stopping = EarlyStopping(net.state_dict(), 'classifiers/mnist.pth')
+    early_stopping = EarlyStopping(net.state_dict(), 'models/cls_mnist_mnist.pt')
 
     for epoch in range(max_epochs):
         print(f'Epoch {epoch}')
