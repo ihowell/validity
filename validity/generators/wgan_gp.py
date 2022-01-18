@@ -150,7 +150,14 @@ class WGAN_GP(nn.Module):
         }
 
 
-def train(dataset, generator_iters=200000, batch_size=64, data_root='./datasets/', cuda_idx=0):
+def train(dataset,
+          generator_iters=200000,
+          batch_size=64,
+          data_root='./datasets/',
+          cuda_idx=0,
+          lambda_term=10.,
+          critic_iter=5,
+          id=None):
     if dataset == 'mnist':
         num_channels = 1
     elif dataset == 'fmnist':
@@ -158,7 +165,7 @@ def train(dataset, generator_iters=200000, batch_size=64, data_root='./datasets/
     elif dataset == 'cifar10':
         num_channels = 3
 
-    gan = WGAN_GP(num_channels=num_channels)
+    gan = WGAN_GP(critic_iter=critic_iter, lambda_term=lambda_term, num_channels=num_channels)
     gan = gan.cuda()
     gan.train()
 
@@ -167,8 +174,10 @@ def train(dataset, generator_iters=200000, batch_size=64, data_root='./datasets/
     train_loader = loop_gen(train_loader)
 
     save_name = f'mnist'
-    writer = SummaryWriter('gan/' + save_name)
-    save_path = f'gan/{save_name}.pt'
+    if id:
+        save_name += '_' + id
+    writer = SummaryWriter('tensorboard/wgan_gp/' + save_name)
+    save_path = f'models/wgan_gp_{save_name}.pt'
 
     optim_disc, optim_gen = gan.get_train_optimizers()
 
@@ -189,6 +198,21 @@ def train(dataset, generator_iters=200000, batch_size=64, data_root='./datasets/
         step += 1
 
 
+def submit_train_multiple(dataset, lambda_terms, critic_iters, **kwargs):
+    executor = get_executor()
+    jobs = []
+    with executor.batch():
+        for lambda_term in lambda_terms:
+            for critic_iter in critic_iters:
+                jobs.append(
+                    executor.submit(train,
+                                    dataset,
+                                    lambda_term=lambda_term,
+                                    critic_iters=critic_iters,
+                                    **kwargs))
+    [job.result() for job in jobs]
+
+
 def test_encode(gan_path, batch_size=64, data_root='./datasets/', cuda_idx=0, seed=0):
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(seed)
@@ -202,7 +226,7 @@ def test_encode(gan_path, batch_size=64, data_root='./datasets/', cuda_idx=0, se
     train_set, _ = load_datasets('mnist')
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
 
-    writer = SummaryWriter('gan/mnist_encode_1')
+    writer = SummaryWriter('data/gan_mnist_encode_1')
 
     for data, label in train_loader:
         data = data

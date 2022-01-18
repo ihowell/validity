@@ -25,7 +25,7 @@ from validity.datasets import load_datasets
 from validity.generators.load import load_gen, load_encoded_ds
 from validity.util import EarlyStopping
 
-IMPROVE_EPS = 5e-3
+IMPROVE_EPS = 1e-3
 
 
 def cdeepex(generator,
@@ -43,8 +43,8 @@ def cdeepex(generator,
             seed=None,
             del_x_threshold=1e-1,
             del_x_patience=5,
-            min_c=1e2,
-            max_c=1e5,
+            min_c=1e3,
+            max_c=1e4,
             lr=1e-5,
             grad_eps=1.,
             **kwargs):
@@ -202,10 +202,10 @@ def cdeepex(generator,
             best_z = torch.where(loss < improved_loss, z, best_z).detach()
             best_loss = torch.where(loss < improved_loss, loss, best_loss).detach()
 
-        # updates = torch.logical_or(steps_since_best_loss >= inner_patience,
-        #                            inner_steps >= inner_iters)
+        updates = torch.logical_or(steps_since_best_loss >= inner_patience,
+                                   inner_steps >= inner_iters)
 
-        updates = grad_norm < grad_eps
+        # updates = grad_norm < grad_eps
 
         inner_steps += 1
         if not updates.any():
@@ -239,7 +239,7 @@ def cdeepex(generator,
             assert (best_loss <= old_loss).all()
 
             # Update outer iteration parameters.
-            # https://www.cs.cmu.edu/~pradeepr/convexopt/Lecture_Slides/Augmented-lagrangian.pdf
+            # dimitri1999nonlinear, Section 4.2.2
             n_lam = s_lam + s_c * h(s_logits, s_y_true, s_y_probe).squeeze(-1)
             vals = s_mu_1 + s_c.unsqueeze(-1) * h(s_logits, s_y_true, s_y_prime_idx)
             n_mu_1 = torch.maximum(torch.zeros_like(vals).cuda(), vals)
