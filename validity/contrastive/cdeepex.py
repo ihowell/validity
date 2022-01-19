@@ -25,7 +25,7 @@ from validity.datasets import load_datasets
 from validity.generators.load import load_gen, load_encoded_ds
 from validity.util import EarlyStopping
 
-IMPROVE_EPS = 1e-3
+IMPROVE_EPS = 5e-3
 
 
 def cdeepex(generator,
@@ -44,7 +44,7 @@ def cdeepex(generator,
             del_x_threshold=1e-1,
             del_x_patience=5,
             min_c=1e3,
-            max_c=1e4,
+            max_c=1e3,
             lr=1e-5,
             grad_eps=1.,
             **kwargs):
@@ -63,6 +63,7 @@ def cdeepex(generator,
     else:
         z_0 = generator.encode(x_start).detach().clone()
 
+    last_feasible = [None] * n
     z_res = [None] * n
 
     z = z_0.detach().clone().requires_grad_()
@@ -159,13 +160,16 @@ def cdeepex(generator,
     steps_since_best_loss = torch.zeros(n).cuda()
 
     for i in tqdm(range(outer_iters * inner_iters)):
-        optimizer.zero_grad()
+        if z.grad is not None:
+            z.grad.detach_()
+            z.grad.zero_()
 
         loss, _, _, _ = loss_fn(z, writer=writer)
         loss.sum().backward()
-        grad_norm = z.grad.norm(p=2)
-        writer[0].add_scalar('cdeepex_inner/grad_norm', grad_norm, i)
-        optimizer.step()
+        grad_norm = z.grad.norm(p=2, dim=1)
+
+        with torch.no_grad():
+            z.add_(z.grad, alpha=lr)
 
         x_temp = generator.decode(z)
         logits = classifier(x_temp)
@@ -190,6 +194,7 @@ def cdeepex(generator,
                         'logits/probe marginal',
                         (logits[idx, y_probe[idx]] - logits[idx, y_prime_idx].max()), step)
                     writer[idx].add_image('cdeepex/example', torch.tensor(tmp_img[idx]), step)
+                    writer[idx].add_scalar('cdeepex_inner/grad_norm', grad_norm[idx], step)
 
         if best_loss is None:
             best_loss = loss.detach()
@@ -202,8 +207,8 @@ def cdeepex(generator,
             best_z = torch.where(loss < improved_loss, z, best_z).detach()
             best_loss = torch.where(loss < improved_loss, loss, best_loss).detach()
 
-        updates = torch.logical_or(steps_since_best_loss >= inner_patience,
-                                   inner_steps >= inner_iters)
+        updates = steps_since_best_loss >= inner_patience
+        # inner_steps >= inner_iters)
 
         # updates = grad_norm < grad_eps
 
@@ -233,7 +238,6 @@ def cdeepex(generator,
             s_y_prime_idx = y_prime_idx[update_idx]
             s_mu_1 = mu_1[update_idx]
             s_mu_2 = mu_2[update_idx]
-            s_c = c[update_idx]
 
             old_loss, _, _, _ = loss_fn(s_old_z)
             assert (best_loss <= old_loss).all()
@@ -270,17 +274,18 @@ def cdeepex(generator,
                 old_z[idx] = z[idx].detach().clone()
                 best_loss[idx] = n_loss[j].detach()
 
-                valid_sat = update_h[j] < 0.
-                eq_con_sat = lam[idx].abs() < 0.1 and 0. < eq_constraint[idx] < 0.1
-                ineq_con_1_sat = (mu_1[idx] == 0.).all() and (ineq_constraint_1[idx]
-                                                              == 0.).all()
-                ineq_con_2_sat = (mu_1[idx] == 0.).all() and (ineq_constraint_1[idx]
-                                                              == 0.).all()
+            eq_con_sat = h(s_logits, s_y_true, s_y_probe) < .5
+            ineq_con_1_sat = (h(s_logits, s_y_true, s_y_prime_idx) > 0.).all(dim=-1)
+            ineq_con_2_sat = (h(s_logits, s_y_probe, s_y_prime_idx) > 0.).all(dim=-1)
+            feasible = torch.logical_and(eq_con_sat,
+                                         torch.logical_and(ineq_con_1_sat, ineq_con_2_sat))
 
-                if valid_sat and eq_con_sat and ineq_con_1_sat and ineq_con_2_sat:
-                    # print(f'feasible lam: {lam[idx]} {i=} {outer_steps[idx]=}')
-                    img = torch.cat([x_start, x_temp], 3)
-                    writer[idx].add_image('cdeepex/feasible', img[idx], outer_steps[idx])
+            for j, f_idx in torch.where(feasible)[0]:
+                # print(f'feasible lam: {lam[idx]} {i=} {outer_steps[idx]=}')
+                idx = update_idx[f_idx]
+                img = torch.cat([x_start, x_temp], 3)
+                writer[idx].add_image('cdeepex/feasible', img[idx], outer_steps[idx])
+                last_feasible[int(active_indices[idx])] = s_z[i].detach().clone()
 
             if writer:
                 img = torch.cat([x_start, x_temp], 3)
@@ -288,22 +293,22 @@ def cdeepex(generator,
                     for j, idx in enumerate(update_idx):
                         step = outer_steps[idx]
                         writer[idx].add_scalar('cdeepex/lam', lam[idx], step)
-                        for k in range(mu_1.size(1)):
-                            writer[idx].add_scalar(f'mu_1/{k}', mu_1[idx, k], step)
-                            writer[idx].add_scalar(f'mu_2/{k}', mu_2[idx, k], step)
                         writer[idx].add_scalar('cdeepex/penalty', c[idx], step)
                         writer[idx].add_scalar('cdeepex/del x', del_x_norm[idx], step)
                         writer[idx].add_scalar('cdeepex/n_loss', n_loss[idx], step)
-                else:
-                    writer.add_scalar('cdeepex/lam', lam.mean(), step)
-                    writer.add_scalar('cdeepex/mu_1', mu_1.mean(), step)
-                    writer.add_scalar('cdeepex/mu_2', mu_2.mean(), step)
-                    writer.add_scalar('cdeepex/penalty', c.mean(), step)
-                    writer.add_scalar('cdeepex/del x', del_x_norm.mean(), step)
-
-            # print(f'step: {i} min loss: {float(loss.mean()):.4f} '
-            #       f'del x: {float(del_x_norm.mean()):.4f} '
-            #       f'updates: {list(update_idx.cpu().detach().numpy())}')
+                        writer[idx].add_scalar('cdeepex_inner/lam', lam[idx], i)
+                        writer[idx].add_scalar('cdeepex_inner/penalty', c[idx], i)
+                        writer[idx].add_scalar('cdeepex_inner/del x', del_x_norm[idx], i)
+                        writer[idx].add_scalar('cdeepex_inner/n_loss', n_loss[idx], i)
+                        for k in range(mu_1.size(1)):
+                            writer[idx].add_scalar(f'mu_1/{k}', mu_1[idx, k], step)
+                            writer[idx].add_scalar(f'mu_2/{k}', mu_2[idx, k], step)
+                # else:
+                #     writer.add_scalar('cdeepex/lam', lam.mean(), step)
+                #     writer.add_scalar('cdeepex/mu_1', mu_1.mean(), step)
+                #     writer.add_scalar('cdeepex/mu_2', mu_2.mean(), step)
+                #     writer.add_scalar('cdeepex/penalty', c.mean(), step)
+                #     writer.add_scalar('cdeepex/del x', del_x_norm.mean(), step)
 
             # Calculate outer steps under threshold for exiting optimization
             updated_steps = torch.where(
@@ -355,11 +360,13 @@ def cdeepex(generator,
                 new_writer = [writer[int(idx)] for idx in idx_to_keep]
                 writer = new_writer
 
-            optimizer = optim.SGD([z], lr=lr)
+    res = []
+    for i, f in enumerate(last_feasible):
+        if f is None:
+            res.append(z_res[i])
+    res = torch.stack(res)
 
-    z = torch.stack(z_res)
-
-    return generator.decode(z)
+    return generator.decode(res)
 
 
 def run_cdeepex(dataset,
@@ -382,9 +389,9 @@ def run_cdeepex(dataset,
     _, test_ds = load_datasets(dataset)
     encoded_test_ds = load_encoded_ds(dataset, generator_net_type, encode_dir=encode_dir)
     loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False)
-    encode_loader = torch.utils.data.DataLoader(encoded_test_ds,
-                                                batch_size=batch_size,
-                                                shuffle=False)
+    # encode_loader = torch.utils.data.DataLoader(encoded_test_ds,
+    #                                             batch_size=batch_size,
+    #                                             shuffle=False)
 
     if dataset == 'mnist':
         num_classes = 10
