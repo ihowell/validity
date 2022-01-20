@@ -25,7 +25,7 @@ def make_contrastive_dataset(contrastive_type,
                              batch_size=1,
                              data_root='./datasets/',
                              cuda_idx=0,
-                             seed=1,
+                             seed=0,
                              dry_run_size=None,
                              **kwargs):
     assert contrastive_type in ['xgems', 'cdeepex']

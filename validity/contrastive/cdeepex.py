@@ -128,7 +128,7 @@ def cdeepex(generator,
             used_lr = torch.exp(ln_lr_start + (ln_lr_end - ln_lr_start) * (c - 1) /
                                 (max_c - 1))
         else:
-            used_lr = lr
+            used_lr = torch.tensor(lr)
 
         with torch.no_grad():
             z.add_(-z.grad * used_lr.unsqueeze(-1))
@@ -254,7 +254,8 @@ def cdeepex(generator,
                 # print(f'feasible lam: {lam[idx]} {i=} {outer_steps[idx]=}')
                 idx = update_idx[f_idx]
                 img = torch.cat([x_start, x_temp], 3)
-                writer[idx].add_image('cdeepex/feasible', img[idx], outer_steps[idx])
+                if writer and type(writer) is list:
+                    writer[idx].add_image('cdeepex/feasible', img[idx], outer_steps[idx])
                 z_res[int(active_indices[idx])] = s_z[j].detach().clone()
 
             if writer:
