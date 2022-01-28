@@ -4,6 +4,7 @@ import inspect
 import time
 import sys
 import json
+import math
 from pathlib import Path
 from typing import Generator
 
@@ -30,12 +31,12 @@ IMPROVE_EPS = 5e-3
 
 def cdeepex(generator,
             classifier,
-            x_start,
-            y_probe,
+            x_init,
+            y_probe_init,
             num_classes,
             batch_size=None,
             writer=None,
-            z_start=None,
+            z_init=None,
             inner_patience=100,
             outer_iters=10000,
             tb_writer=None,
@@ -53,32 +54,37 @@ def cdeepex(generator,
     approximation of the data manifold.
 
     Args:
-        x_start (tf.Tensor): (1CHW)
+        x_init (tf.Tensor): (1CHW)
         y_target (tf.Tensor): ()
 
     """
-    N = x_start.size(0)
+    N = x_init.size(0)
     z_res = [None] * N
 
     if batch_size is None:
         batch_size = N
 
+    if z_init is None:
+        z_init = []
+        for i in range(math.ceil(x_init.size(0) / batch_size)):
+            z_init.append(generator.encode(x_init[i * batch_size:(i + 1) * batch_size].cuda()))
+        z_init = torch.cat(z_init).detach_()
+    else:
+        z_init = z_init.cuda()
+
     def data_gen():
-        for i in range(x_start.size(0)):
-            z = None
-            if z_start is not None:
-                z = z_start[i]
-            yield x_start[i], y_probe[i], z
+        for i in range(x_init.size(0)):
+            yield i, x_init[i], y_probe_init[i], z_init[i]
 
-    data = [data for _, data in zip(range(batch_size), data_gen())]
-    x_start, y_probe, z_start = zip(*data)
+    data_gen_itr = iter(data_gen())
 
+    data = [data for _, data in zip(range(batch_size), data_gen_itr)]
+    active_indices, x_start, y_probe, z_start = zip(*data)
+
+    active_indices = torch.tensor(active_indices).cuda()
     x_start = torch.stack(x_start).cuda()
     y_probe = torch.stack(y_probe).cuda()
-    if z_start[0] is None:
-        z_0 = generator.encode(x_start).detach().clone()
-    else:
-        z_0 = torch.stack(z_start).cuda()
+    z_0 = torch.stack(z_start).cuda()
 
     n = x_start.size(0)
 
@@ -89,14 +95,12 @@ def cdeepex(generator,
 
     assert torch.where(y_true == y_probe)[0].size(0) == 0
 
-    active_indices = torch.arange(n).cuda()
-
     if lr_end is not None:
         ln_lr_start = torch.log(torch.tensor(lr))
         ln_lr_end = torch.log(torch.tensor(lr_end))
 
-    c = torch.tensor([1.] * n).cuda()
-    lam = torch.tensor([1.] * n).cuda()
+    c = torch.ones(n).cuda()
+    lam = torch.ones(n).cuda()
     mu_1 = torch.ones((n, num_classes - 2)).cuda()
     mu_2 = torch.ones((n, num_classes - 2)).cuda()
     beta = 1.01
@@ -108,7 +112,6 @@ def cdeepex(generator,
 
     steps_under_threshold = torch.zeros(n).cuda()
     old_z = z.detach().clone()
-    best_loss = None
     inner_steps = torch.zeros(n).cuda()
     outer_steps = torch.zeros(n).cuda()
     steps_since_best_loss = torch.zeros(n).cuda()
@@ -116,6 +119,7 @@ def cdeepex(generator,
     img = generator.decode(z)
     logits = classifier(img)
     loss, _, _, _ = loss_fn(z, z_0, logits, y_true, y_probe, y_prime_idx, lam, mu_1, mu_2, c)
+    best_loss = loss.detach().clone()
 
     def inf_gen():
         i = 0
@@ -151,6 +155,7 @@ def cdeepex(generator,
                                 mu_2,
                                 c,
                                 writer=writer,
+                                active_indices=active_indices,
                                 step=i)
         loss.sum().backward()
         grad_norm = z.grad.norm(p=2, dim=1)
@@ -192,17 +197,13 @@ def cdeepex(generator,
                     writer[idx].add_image('cdeepex/example', torch.tensor(tmp_img[idx]), step)
                     writer[idx].add_scalar('cdeepex_inner/grad_norm', grad_norm[idx], step)
 
-        if best_loss is None:
-            best_loss = loss.detach()
-        else:
-            improved_loss = torch.where(best_loss > 0., (1 - IMPROVE_EPS) * best_loss,
-                                        best_loss - IMPROVE_EPS)
-            steps_since_best_loss = torch.where(loss < improved_loss,
-                                                torch.tensor(0.).cuda(),
-                                                steps_since_best_loss + 1)
+        improved_loss = torch.where(best_loss > 0., (1 - IMPROVE_EPS) * best_loss,
+                                    best_loss - IMPROVE_EPS)
+        steps_since_best_loss = torch.where(loss < improved_loss,
+                                            torch.tensor(0.).cuda(), steps_since_best_loss + 1)
 
-            best_z = torch.where((loss < improved_loss).unsqueeze(-1), z, best_z).detach()
-            best_loss = torch.where(loss < improved_loss, loss, best_loss).detach()
+        best_z = torch.where((loss < improved_loss).unsqueeze(-1), z, best_z).detach()
+        best_loss = torch.where(loss < improved_loss, loss, best_loss).detach()
 
         updates = steps_since_best_loss >= inner_patience
 
@@ -239,7 +240,8 @@ def cdeepex(generator,
 
             old_loss, _, _, _ = loss_fn(s_old_z, s_z_0, s_old_logits, s_y_true, s_y_probe,
                                         s_y_prime_idx, s_lam, s_mu_1, s_mu_2, s_c)
-            assert (best_loss[update_idx] <= old_loss).all()
+            # assert torch.logical_or(best_loss[update_idx] <= old_loss,
+            #                         torch.isclose(best_loss[update_idx], old_loss)).all()
 
             # Update outer iteration parameters.
             # dimitri1999nonlinear, Section 4.2.2
@@ -321,7 +323,7 @@ def cdeepex(generator,
             if idx_to_remove.size(0) == 0:
                 continue
 
-            pbar.update(idx_to_remove.size(0))
+            p_bar.update(idx_to_remove.size(0))
 
             for i in idx_to_remove:
                 print(f'Storing {int(active_indices[i])}')
@@ -329,36 +331,91 @@ def cdeepex(generator,
                     z_res[int(active_indices[i])] = z[i].detach().clone()
 
             idx_to_keep = torch.tensor([i for i in range(n) if i not in idx_to_remove]).cuda()
-            n = idx_to_keep.size(0)
-            if idx_to_keep.size(0) == 0:
+
+            data_to_add = [data for _, data in zip(range(idx_to_remove.size(0)), data_gen_itr)]
+            n_add = len(data_to_add)
+
+            if idx_to_keep.size(0) + n_add == 0:
                 break
 
-            z = z[idx_to_keep].detach().requires_grad_()
-            active_indices = active_indices[idx_to_keep].detach()
-            z_0 = z_0[idx_to_keep].detach()
-            del_z_0 = del_z_0[idx_to_keep].detach()
-            y_true = y_true[idx_to_keep].detach()
-            y_probe = y_probe[idx_to_keep].detach()
-            y_prime_idx = y_prime_idx[idx_to_keep].detach()
-            lam = lam[idx_to_keep].detach()
-            mu_1 = mu_1[idx_to_keep].detach()
-            mu_2 = mu_2[idx_to_keep].detach()
-            c = c[idx_to_keep].detach()
-            x_start = x_start[idx_to_keep].detach()
-            steps_under_threshold = steps_under_threshold[idx_to_keep].detach()
-            old_z = old_z[idx_to_keep].detach()
-            best_loss = best_loss[idx_to_keep].detach()
-            best_z = best_z[idx_to_keep].detach()
-            inner_steps = outer_steps[idx_to_keep].detach()
-            outer_steps = outer_steps[idx_to_keep].detach()
-            steps_since_best_loss = steps_since_best_loss[idx_to_keep].detach()
+            if n_add > 0:
+                idx_to_add, x_start_to_add, y_probe_to_add, z_0_to_add = zip(*data_to_add)
 
-            if type(writer) is list:
-                new_writer = [writer[int(idx)] for idx in idx_to_keep]
-                writer = new_writer
+                idx_to_add = torch.tensor(idx_to_add).cuda()
+                x_start_to_add = torch.stack(x_start_to_add).cuda()
+                y_probe_to_add = torch.stack(y_probe_to_add).cuda()
+                z_0_to_add = torch.stack(z_0_to_add).cuda()
+
+                del_z_0_to_add = (x_start_to_add -
+                                  generator.decode(z_0_to_add)).detach().clone()
+                logits_to_add = classifier(x_start_to_add)
+                y_true_to_add = logits_to_add.argmax(-1)
+                y_prime_idx_to_add = [[
+                    i for i in range(num_classes)
+                    if i not in [y_true_to_add[j], y_probe_to_add[j]]
+                ] for j in range(n_add)]
+                y_prime_idx_to_add = torch.tensor(y_prime_idx_to_add).cuda()
+                loss_to_add, _, _, _ = loss_fn(z_0_to_add, z_0_to_add, logits_to_add,
+                                               y_true_to_add, y_probe_to_add,
+                                               y_prime_idx_to_add,
+                                               torch.ones(n_add).cuda(),
+                                               torch.ones((n_add, num_classes - 2)).cuda(),
+                                               torch.ones((n_add, num_classes - 2)).cuda(),
+                                               torch.ones(n_add).cuda())
+
+                # yapf: disable
+                z              = torch.cat([z[idx_to_keep],              z_0_to_add]).detach_().clone().requires_grad_()
+                z_0            = torch.cat([z_0[idx_to_keep],            z_0_to_add]).detach_().clone()
+                best_z         = torch.cat([best_z[idx_to_keep],         z_0_to_add]).detach_().clone()
+                old_z          = torch.cat([old_z[idx_to_keep],          z_0_to_add]).detach_().clone()
+                del_z_0        = torch.cat([del_z_0[idx_to_keep],        del_z_0_to_add]).detach_()
+                active_indices = torch.cat([active_indices[idx_to_keep], idx_to_add]).detach_()
+                x_start        = torch.cat([x_start[idx_to_keep],        x_start_to_add]).detach_()
+                y_true         = torch.cat([y_true[idx_to_keep],         y_true_to_add]).detach_()
+                y_probe        = torch.cat([y_probe[idx_to_keep],        y_probe_to_add]).detach_()
+                y_prime_idx    = torch.cat([y_prime_idx[idx_to_keep],    y_prime_idx_to_add]).detach_()
+                best_loss      = torch.cat([best_loss[idx_to_keep],      loss_to_add]).detach_()
+
+                lam                   = torch.cat([lam[idx_to_keep],                   torch.ones(n_add).cuda()]).detach_()
+                mu_1                  = torch.cat([mu_1[idx_to_keep],                  torch.ones((n_add, num_classes - 2)).cuda()]).detach_()
+                mu_2                  = torch.cat([mu_2[idx_to_keep],                  torch.ones((n_add, num_classes - 2)).cuda()]).detach_()
+                c                     = torch.cat([c[idx_to_keep],                     torch.ones(n_add).cuda()]).detach_()
+                steps_under_threshold = torch.cat([steps_under_threshold[idx_to_keep], torch.zeros(n_add).cuda()]).detach_()
+                inner_steps           = torch.cat([outer_steps[idx_to_keep],           torch.zeros(n_add).cuda()]).detach_()
+                outer_steps           = torch.cat([outer_steps[idx_to_keep],           torch.zeros(n_add).cuda()]).detach_()
+                steps_since_best_loss = torch.cat([steps_since_best_loss[idx_to_keep], torch.zeros(n_add).cuda()]).detach_()
+                # yapf: enable
+            else:
+                # yapf: disable
+                z              = z[idx_to_keep].detach_().clone().requires_grad_()
+                z_0            = z_0[idx_to_keep].detach_().clone()
+                best_z         = best_z[idx_to_keep].detach_().clone()
+                old_z          = old_z[idx_to_keep].detach_().clone()
+                del_z_0        = del_z_0[idx_to_keep].detach_()
+                active_indices = active_indices[idx_to_keep].detach_()
+                x_start        = x_start[idx_to_keep].detach_()
+                y_true         = y_true[idx_to_keep].detach_()
+                y_probe        = y_probe[idx_to_keep].detach_()
+                y_prime_idx    = y_prime_idx[idx_to_keep].detach_()
+                best_loss      = best_loss[idx_to_keep].detach_()
+
+                lam                   = lam[idx_to_keep].detach_()
+                mu_1                  = mu_1[idx_to_keep].detach_()
+                mu_2                  = mu_2[idx_to_keep].detach_()
+                c                     = c[idx_to_keep].detach_()
+                steps_under_threshold = steps_under_threshold[idx_to_keep].detach_()
+                inner_steps           = outer_steps[idx_to_keep].detach_()
+                outer_steps           = outer_steps[idx_to_keep].detach_()
+                steps_since_best_loss = steps_since_best_loss[idx_to_keep].detach_()
+                # yapf: enable
+
+            n = z.size(0)
 
     res = torch.stack(z_res)
-    return generator.decode(res)
+    decoded = []
+    for i in range(math.ceil(res.size(0) / batch_size)):
+        decoded.append(generator.decode(res[i * batch_size:(i + 1) * batch_size].cuda()))
+    return torch.cat(decoded)
 
 
 def h(logits, y_1, y_2):
@@ -380,6 +437,7 @@ def loss_fn(z,
             mu_2,
             c,
             writer=None,
+            active_indices=None,
             step=None):
     obj = (z - z_0).square().sum(dim=-1)
     h_true_probe = h(logits, y_true, y_probe)
@@ -402,22 +460,23 @@ def loss_fn(z,
 
     if writer:
         if type(writer) is list:
-            for idx in range(loss.size(0)):
-                writer[idx].add_scalar('cdeepex_inner/loss', loss[idx], step)
-                writer[idx].add_scalar('cdeepex_inner/obj', obj[idx], step)
-                writer[idx].add_scalar('cdeepex_inner/eq_constraint', eq_constraint[idx], step)
+            for i in range(loss.size(0)):
+                idx = active_indices[i]
+                writer[idx].add_scalar('cdeepex_inner/loss', loss[i], step)
+                writer[idx].add_scalar('cdeepex_inner/obj', obj[i], step)
+                writer[idx].add_scalar('cdeepex_inner/eq_constraint', eq_constraint[i], step)
                 writer[idx].add_scalar('cdeepex_inner/ineq_constraint_1_mean',
-                                       ineq_constraint_1[idx].mean(), step)
+                                       ineq_constraint_1[i].mean(), step)
                 writer[idx].add_scalar('cdeepex_inner/ineq_constraint_2_mean',
-                                       ineq_constraint_2[idx].mean(), step)
-                for j in range(ineq_constraint_1[idx].size(0)):
-                    writer[idx].add_scalar(f'ineq_constraint_1/{j}', ineq_constraint_1[idx, j],
+                                       ineq_constraint_2[i].mean(), step)
+                for j in range(ineq_constraint_1[i].size(0)):
+                    writer[idx].add_scalar(f'ineq_constraint_1/{j}', ineq_constraint_1[i, j],
                                            step)
-                    writer[idx].add_scalar(f'ineq_constraint_2/{j}', ineq_constraint_2[idx, j],
+                    writer[idx].add_scalar(f'ineq_constraint_2/{j}', ineq_constraint_2[i, j],
                                            step)
-                    writer[idx].add_scalar(f'ineq_constraint_1/h_{j}', h_prime_true[idx, j],
+                    writer[idx].add_scalar(f'ineq_constraint_1/h_{j}', h_prime_true[i, j],
                                            step)
-                    writer[idx].add_scalar(f'ineq_constraint_2/h_{j}', h_prime_probe[idx, j],
+                    writer[idx].add_scalar(f'ineq_constraint_2/h_{j}', h_prime_probe[i, j],
                                            step)
 
     return loss, eq_constraint, ineq_constraint_1, ineq_constraint_2
@@ -428,7 +487,7 @@ def run_cdeepex(dataset,
                 classifier_weights_path,
                 generator_net_type,
                 generator_weights_path,
-                batch_size=1,
+                total_data=1,
                 data_root='./datasets/',
                 lr=1e-5,
                 cuda_idx=0,
@@ -437,16 +496,13 @@ def run_cdeepex(dataset,
                 id=None,
                 target_label=None,
                 encode_dir=None,
+                log_tensorboard=True,
                 **kwargs):
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     _, test_ds = load_datasets(dataset)
     encoded_test_ds = load_encoded_ds(dataset, generator_net_type, encode_dir=encode_dir)
-    loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False)
-    # encode_loader = torch.utils.data.DataLoader(encoded_test_ds,
-    #                                             batch_size=batch_size,
-    #                                             shuffle=False)
 
     if dataset == 'mnist':
         num_classes = 10
@@ -457,7 +513,10 @@ def run_cdeepex(dataset,
     generator = load_gen(generator_net_type, generator_weights_path, dataset)
     generator.eval()
 
-    data, label = next(iter(loader))
+    data = [data for _, data in zip(range(total_data), test_ds)]
+    data, label = zip(*data)
+    data = torch.stack(data)
+    label = torch.tensor(label)
     # z_start, _ = next(iter(encode_loader))
     z_start = generator.encode(data.cuda()).clone().detach()
 
@@ -473,10 +532,13 @@ def run_cdeepex(dataset,
     else:
         target_label = (label + 1) % 10
 
-    writer_paths = [f'runs/cdeepex_{i}' for i in range(target_label.size(0))]
-    if id:
-        writer_paths = [f'{p}_{id}' for p in writer_paths]
-    writers = [SummaryWriter(p) for p in writer_paths]
+    writers = None
+    if log_tensorboard:
+        writer_paths = [f'runs/cdeepex_{i}' for i in range(target_label.size(0))]
+        if id:
+            writer_paths = [f'{p}_{id}' for p in writer_paths]
+        writers = [SummaryWriter(p) for p in writer_paths]
+
     start = time.time()
     print('Starting cdeepex')
     x_hat = cdeepex(generator,

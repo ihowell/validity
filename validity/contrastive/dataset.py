@@ -98,8 +98,9 @@ def _make_contrastive_dataset_job(contrastive_type,
 
     examples = []
     example_labels = []
-    for (data, _), (encoded_data, _) in tqdm(zip_loader):
-        if contrastive_type == 'xgems':
+
+    if contrastive_type == 'xgems':
+        for (data, _), (encoded_data, _) in tqdm(zip_loader):
             for target_label in range(num_labels):
                 target_label = torch.tensor(target_label).unsqueeze(0)
                 x_hat = xgems(generator,
@@ -110,26 +111,33 @@ def _make_contrastive_dataset_job(contrastive_type,
                               **kwargs)
                 examples.append(x_hat.cpu().detach().numpy())
                 example_labels.append(tiled_label.numpy())
-        elif contrastive_type == 'cdeepex':
-            n = data.size(0)
-            tiled_data = data.repeat_interleave(num_labels - 1, dim=0)
-            tiled_encoded = encoded_data.repeat_interleave(num_labels - 1, dim=0)
+    elif contrastive_type == 'cdeepex':
+        data, encoded_data = [], []
+        for (d, _), (enc_d, _) in zip_loader:
+            data.append(d)
+            encoded_data.append(enc_d)
+        data = torch.cat(data)
+        encoded_data = torch.cat(encoded_data)
 
-            y_true = classifier(data.cuda()).argmax(-1)
-            tiled_target = torch.tensor([[i for i in range(num_labels) if i != y_true[j]]
-                                         for j in range(n)])
-            tiled_target = tiled_target.reshape(-1)
+        n = data.size(0)
+        tiled_data = data.repeat_interleave(num_labels - 1, dim=0)
+        tiled_encoded = encoded_data.repeat_interleave(num_labels - 1, dim=0)
 
-            x_hat = cdeepex(generator,
-                            classifier,
-                            tiled_data,
-                            tiled_target,
-                            num_labels,
-                            z_start=tiled_encoded,
-                            **kwargs)
+        y_true = classifier(data.cuda()).argmax(-1)
+        tiled_target = torch.tensor([[i for i in range(num_labels) if i != y_true[j]]
+                                     for j in range(n)])
+        tiled_target = tiled_target.reshape(-1)
 
-            examples.append(x_hat.cpu().detach().numpy())
-            example_labels.append(tiled_target.numpy())
+        x_hat = cdeepex(generator,
+                        classifier,
+                        tiled_data,
+                        tiled_target,
+                        num_labels,
+                        z_start=tiled_encoded,
+                        **kwargs)
+
+        examples = [x_hat.cpu().detach().numpy()]
+        example_labels = [tiled_target.numpy()]
 
     examples = np.concatenate(examples)
     example_labels = np.concatenate(example_labels)
