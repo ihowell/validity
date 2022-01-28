@@ -4,8 +4,8 @@ import inspect
 import time
 import sys
 import json
-import time
 from pathlib import Path
+from typing import Generator
 
 import matplotlib.pyplot as plt
 from tqdm import tqdm
@@ -33,9 +33,9 @@ def cdeepex(generator,
             x_start,
             y_probe,
             num_classes,
+            batch_size=None,
             writer=None,
             z_start=None,
-            inner_iters=100000,
             inner_patience=100,
             outer_iters=10000,
             tb_writer=None,
@@ -57,20 +57,35 @@ def cdeepex(generator,
         y_target (tf.Tensor): ()
 
     """
-    n = x_start.size(0)
-    x_start = x_start.cuda()
-    if z_start is not None:
-        z_0 = z_start.cuda()
-    else:
-        z_0 = generator.encode(x_start).detach().clone()
+    N = x_start.size(0)
+    z_res = [None] * N
 
-    z_res = [None] * n
+    if batch_size is None:
+        batch_size = N
+
+    def data_gen():
+        for i in range(x_start.size(0)):
+            z = None
+            if z_start is not None:
+                z = z_start[i]
+            yield x_start[i], y_probe[i], z
+
+    data = [data for _, data in zip(range(batch_size), data_gen())]
+    x_start, y_probe, z_start = zip(*data)
+
+    x_start = torch.stack(x_start).cuda()
+    y_probe = torch.stack(y_probe).cuda()
+    if z_start[0] is None:
+        z_0 = generator.encode(x_start).detach().clone()
+    else:
+        z_0 = torch.stack(z_start).cuda()
+
+    n = x_start.size(0)
 
     z = z_0.detach().clone().requires_grad_()
     best_z = z.detach().clone()
     del_z_0 = (x_start - generator.decode(z_0)).detach().clone()
     y_true = classifier(x_start).argmax(-1)
-    y_probe = y_probe.cuda()
 
     assert torch.where(y_true == y_probe)[0].size(0) == 0
 
@@ -102,7 +117,23 @@ def cdeepex(generator,
     logits = classifier(img)
     loss, _, _, _ = loss_fn(z, z_0, logits, y_true, y_probe, y_prime_idx, lam, mu_1, mu_2, c)
 
-    for i in tqdm(range(outer_iters * inner_iters)):
+    def inf_gen():
+        i = 0
+        while True:
+            yield i
+            i += 1
+
+    perf_time = time.time()
+    perf_iter = 0
+    p_bar = tqdm(total=N)
+    for i in inf_gen():
+        curr_time = time.time()
+        if curr_time - perf_time > 1.0:
+            p_bar.set_description(
+                f'Itr {i} at {float(i - perf_iter) / (curr_time - perf_time):.2f} it/s')
+            perf_time = curr_time
+            perf_iter = i
+
         if z.grad is not None:
             z.grad.detach_()
             z.grad.zero_()
@@ -128,7 +159,7 @@ def cdeepex(generator,
             used_lr = torch.exp(ln_lr_start + (ln_lr_end - ln_lr_start) * (c - 1) /
                                 (max_c - 1))
         else:
-            used_lr = torch.tensor(lr)
+            used_lr = torch.tensor(lr).cuda()
 
         with torch.no_grad():
             z.add_(-z.grad * used_lr.unsqueeze(-1))
@@ -289,6 +320,8 @@ def cdeepex(generator,
 
             if idx_to_remove.size(0) == 0:
                 continue
+
+            pbar.update(idx_to_remove.size(0))
 
             for i in idx_to_remove:
                 print(f'Storing {int(active_indices[i])}')
