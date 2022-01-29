@@ -75,6 +75,7 @@ def _make_contrastive_dataset_job(contrastive_type,
 
     num_labels = 10
 
+    print('Loading datasets')
     _, test_ds = load_datasets(dataset)
     encoded_test_ds = load_encoded_ds(dataset, generator_net_type)
 
@@ -84,15 +85,18 @@ def _make_contrastive_dataset_job(contrastive_type,
 
     zip_ds = ZipDataset(test_ds, encoded_test_ds)
 
+    print('Sharding dataset')
     n = len(zip_ds)
     shard_lower = (n * shard_idx) // shards
     shard_upper = (n * (shard_idx + 1)) // shards
     zip_ds = torch.utils.data.Subset(zip_ds, range(shard_lower, shard_upper))
     zip_loader = torch.utils.data.DataLoader(zip_ds, batch_size=batch_size, shuffle=False)
 
+    print('Loading classifier')
     classifier = load_cls(classifier_net_type, classifier_weights_path, dataset)
     classifier.eval()
 
+    print('Loading generator')
     generator = load_gen(generator_net_type, generator_weights_path, dataset)
     generator.eval()
 
@@ -111,14 +115,16 @@ def _make_contrastive_dataset_job(contrastive_type,
                               **kwargs)
                 examples.append(x_hat.cpu().detach().numpy())
                 example_labels.append(tiled_label.numpy())
+
     elif contrastive_type == 'cdeepex':
         data, encoded_data = [], []
-        for (d, _), (enc_d, _) in zip_loader:
+        for (d, _), (enc_d, _) in tqdm(zip_loader, desc='Collecting data'):
             data.append(d)
             encoded_data.append(enc_d)
         data = torch.cat(data)
         encoded_data = torch.cat(encoded_data)
 
+        print('Tiling data')
         n = data.size(0)
         tiled_data = data.repeat_interleave(num_labels - 1, dim=0)
         tiled_encoded = encoded_data.repeat_interleave(num_labels - 1, dim=0)
@@ -128,6 +134,7 @@ def _make_contrastive_dataset_job(contrastive_type,
                                      for j in range(n)])
         tiled_target = tiled_target.reshape(-1)
 
+        print('Running cdeepex')
         x_hat = cdeepex(generator,
                         classifier,
                         tiled_data,
