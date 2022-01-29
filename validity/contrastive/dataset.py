@@ -140,7 +140,7 @@ def _make_contrastive_dataset_job(contrastive_type,
                         tiled_data,
                         tiled_target,
                         num_labels,
-                        z_start=tiled_encoded,
+                        z_init=tiled_encoded,
                         **kwargs)
 
         examples = [x_hat.cpu().detach().numpy()]
