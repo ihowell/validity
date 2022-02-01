@@ -19,6 +19,7 @@ import torch.optim as optim
 import torch.distributions as dist
 import numpy as np
 from torchvision import datasets, transforms
+from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
 
 from validity.classifiers import load_cls
@@ -26,7 +27,8 @@ from validity.datasets import load_datasets
 from validity.generators.load import load_gen, load_encoded_ds
 from validity.util import EarlyStopping
 
-IMPROVE_EPS = 5e-3
+IMPROVE_EPS = 1e-4
+EQ_EPS = 1e-1
 
 
 def cdeepex(generator,
@@ -276,19 +278,24 @@ def cdeepex(generator,
                 old_z[idx] = z[idx].detach().clone()
                 best_loss[idx] = n_loss[j].detach()
 
-            eq_con_sat = h(s_logits, s_y_true, s_y_probe) < .5
+            eq_con_sat = h(s_logits, s_y_true, s_y_probe) < EQ_EPS
             ineq_con_1_sat = h(s_logits, s_y_true, s_y_prime_idx) >= 0.
             ineq_con_2_sat = h(s_logits, s_y_probe, s_y_prime_idx) >= 0.
             feasible = torch.logical_and(
                 eq_con_sat,
                 torch.logical_and(ineq_con_1_sat.all(dim=-1), ineq_con_2_sat.all(dim=-1)))
 
+            is_feasible = torch.zeros(n).bool().cuda()
+
             for j, f_idx in enumerate(torch.where(feasible)[0]):
                 # print(f'feasible lam: {lam[idx]} {i=} {outer_steps[idx]=}')
                 idx = update_idx[f_idx]
+                is_feasible[idx] = True
                 img = torch.cat([x_start, x_temp], 3)
+                active_idx = active_indices[idx]
                 if writer and type(writer) is list:
-                    writer[idx].add_image('cdeepex/feasible', img[idx], outer_steps[idx])
+                    writer[active_idx].add_image('cdeepex/feasible', img[idx],
+                                                 outer_steps[idx])
                 z_res[int(active_indices[idx])] = s_z[j].detach().clone()
 
             if writer:
@@ -296,17 +303,19 @@ def cdeepex(generator,
                 if type(writer) is list:
                     for j, idx in enumerate(update_idx):
                         step = outer_steps[idx]
-                        writer[idx].add_scalar('cdeepex/lam', lam[idx], step)
-                        writer[idx].add_scalar('cdeepex/penalty', c[idx], step)
-                        writer[idx].add_scalar('cdeepex/del x', del_x_norm[idx], step)
-                        writer[idx].add_scalar('cdeepex/n_loss', n_loss[j], step)
-                        writer[idx].add_scalar('cdeepex_inner/lam', lam[idx], i)
-                        writer[idx].add_scalar('cdeepex_inner/penalty', c[idx], i)
-                        writer[idx].add_scalar('cdeepex_inner/del x', del_x_norm[idx], i)
-                        writer[idx].add_scalar('cdeepex_inner/n_loss', n_loss[j], i)
+                        active_idx = active_indices[idx]
+                        writer[active_idx].add_scalar('cdeepex/lam', lam[idx], step)
+                        writer[active_idx].add_scalar('cdeepex/penalty', c[idx], step)
+                        writer[active_idx].add_scalar('cdeepex/del x', del_x_norm[idx], step)
+                        writer[active_idx].add_scalar('cdeepex/n_loss', n_loss[j], step)
+                        writer[active_idx].add_scalar('cdeepex_inner/lam', lam[idx], i)
+                        writer[active_idx].add_scalar('cdeepex_inner/penalty', c[idx], i)
+                        writer[active_idx].add_scalar('cdeepex_inner/del x', del_x_norm[idx],
+                                                      i)
+                        writer[active_idx].add_scalar('cdeepex_inner/n_loss', n_loss[j], i)
                         for k in range(mu_1.size(1)):
-                            writer[idx].add_scalar(f'mu_1/{k}', mu_1[idx, k], step)
-                            writer[idx].add_scalar(f'mu_2/{k}', mu_2[idx, k], step)
+                            writer[active_idx].add_scalar(f'mu_1/{k}', mu_1[idx, k], step)
+                            writer[active_idx].add_scalar(f'mu_2/{k}', mu_2[idx, k], step)
 
             # Calculate outer steps under threshold for exiting optimization
             updated_steps = torch.where(
@@ -315,10 +324,11 @@ def cdeepex(generator,
                 torch.tensor(0.).cuda())
             steps_under_threshold = torch.where(updates, updated_steps, steps_under_threshold)
 
-            idx_to_remove = torch.where(
-                torch.logical_and(
-                    torch.logical_or(steps_under_threshold >= del_x_patience,
-                                     outer_steps >= outer_iters), c >= min_c))[0]
+            to_remove = torch.logical_and(
+                torch.logical_or(steps_under_threshold >= del_x_patience,
+                                 outer_steps >= outer_iters), c >= min_c)
+
+            idx_to_remove = torch.where(torch.logical_or(is_feasible, to_remove))[0]
 
             if idx_to_remove.size(0) == 0:
                 continue
@@ -554,10 +564,11 @@ def run_cdeepex(dataset,
     print(f'Completion time {finish-start:.1f} sec')
     # print(f'{target_label=}')
     pred_labels = classifier(x_hat).argmax(dim=-1)
-    # print(f'{pred_labels=}')
+    print(f'{pred_labels=}')
 
     img = x_hat.cpu().detach()
-    img = torch.cat([data, img], 3)[0].numpy()
+    img = torch.cat([data, img], 3)
+    img = make_grid(img, nrow=3).numpy()
     img = np.transpose(img, (1, 2, 0))
     plt.imshow(img)
     plt.show()
