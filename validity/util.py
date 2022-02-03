@@ -46,7 +46,7 @@ class EarlyStopping:
                  save_path=None,
                  patience=20,
                  threshold=0.005,
-                 verbose=True):
+                 verbose=False):
         self.save_path = save_path
         self.vars_to_save = vars_to_save
         self.patience = patience

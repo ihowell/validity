@@ -25,7 +25,6 @@ from tensorboardX import SummaryWriter
 from validity.classifiers import load_cls
 from validity.datasets import load_datasets
 from validity.generators.load import load_gen, load_encoded_ds
-from validity.util import EarlyStopping
 
 IMPROVE_EPS = 1e-4
 EQ_EPS = 1e-1

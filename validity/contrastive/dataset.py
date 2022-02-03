@@ -11,8 +11,9 @@ from validity.datasets import load_datasets
 from validity.generators.load import load_gen, load_encoded_ds
 from validity.util import ZipDataset, get_executor
 
-from .xgems import xgems
+from .am import am
 from .cdeepex import cdeepex
+from .xgems import xgems
 
 
 def make_contrastive_dataset(contrastive_type,
@@ -28,7 +29,7 @@ def make_contrastive_dataset(contrastive_type,
                              seed=0,
                              dry_run_size=None,
                              **kwargs):
-    assert contrastive_type in ['xgems', 'cdeepex']
+    assert contrastive_type in ['am', 'xgems', 'cdeepex']
 
     executor = get_executor()
     jobs = []
@@ -103,18 +104,25 @@ def _make_contrastive_dataset_job(contrastive_type,
     examples = []
     example_labels = []
 
-    if contrastive_type == 'xgems':
-        for (data, _), (encoded_data, _) in tqdm(zip_loader):
-            for target_label in range(num_labels):
-                target_label = torch.tensor(target_label).unsqueeze(0)
-                x_hat = xgems(generator,
-                              classifier,
-                              data,
-                              target_label,
-                              z_start=encoded_data,
-                              **kwargs)
-                examples.append(x_hat.cpu().detach().numpy())
-                example_labels.append(tiled_label.numpy())
+    if contrastive_type == 'am':
+        for (data, y_true), (encoded_data, _) in tqdm(zip_loader):
+            n = data.size(0)
+            tiled_data = data.repeat_interleave(num_labels - 1, dim=0)
+            tiled_encoded = encoded_data.repeat_interleave(num_labels - 1, dim=0)
+
+            y_true = classifier(data.cuda()).argmax(-1)
+            tiled_target = torch.tensor([[i for i in range(num_labels) if i != y_true[j]]
+                                         for j in range(n)])
+            tiled_target = tiled_target.reshape(-1)
+
+            x_hat = am(generator,
+                       classifier,
+                       tiled_data,
+                       tiled_target,
+                       z_start=tiled_encoded,
+                       **kwargs)
+            examples.append(x_hat.cpu().detach().numpy())
+            example_labels.append(tiled_target.numpy())
 
     elif contrastive_type == 'cdeepex':
         data, encoded_data = [], []
@@ -145,6 +153,19 @@ def _make_contrastive_dataset_job(contrastive_type,
 
         examples = [x_hat.cpu().detach().numpy()]
         example_labels = [tiled_target.numpy()]
+
+    elif contrastive_type == 'xgems':
+        for (data, _), (encoded_data, _) in tqdm(zip_loader):
+            for target_label in range(num_labels):
+                target_label = torch.tensor(target_label).unsqueeze(0)
+                x_hat = xgems(generator,
+                              classifier,
+                              data,
+                              target_label,
+                              z_start=encoded_data,
+                              **kwargs)
+                examples.append(x_hat.cpu().detach().numpy())
+                example_labels.append(tiled_label.numpy())
 
     examples = np.concatenate(examples)
     example_labels = np.concatenate(example_labels)
