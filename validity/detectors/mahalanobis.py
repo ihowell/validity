@@ -121,6 +121,7 @@ class MahalanobisDetector:
         # Train regressor
         print('Training regressor')
         self.lr = LogisticRegressionCV(n_jobs=-1).fit(scaled_data_val, labels_val)
+        print(f'{self.lr.get_params()=}')
 
         # Evaluate regressor
         print('Evaluating regressor')
@@ -375,6 +376,7 @@ def train_mahalanobis_adv(dataset,
         'adv', f'mahalanobis_adv_{net_type}_{dataset}_{adv_attack}_{magnitude}.pt')
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(detector, save_path)
+
     print(f'Magnitude {magnitude}:')
     for result_name, result in results.items():
         if type(result) in [dict, tuple, list]:

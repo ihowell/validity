@@ -5,14 +5,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
+from tensorboardX import SummaryWriter
 import fire
 
 from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 from torchvision import transforms, datasets
 
-from validity.util import EarlyStopping
+from validity.classifiers.train import standard_train, adversarial_train_for_free
 from validity.datasets import load_datasets
+from validity.util import EarlyStopping
 
 
 class MnistClassifier(nn.Module):
@@ -90,57 +92,24 @@ def test():
     print(y.size())
 
 
-def train_network(max_epochs=1000,
-                  data_root='./datasets/',
-                  cuda_idx=0,
-                  batch_size=64,
-                  l2_reg=None):
+def train_network(max_epochs=1000, data_root='./datasets/', train_method=None, **kwargs):
     net = MnistClassifier()
     net = net.cuda()
     train_set, test_set = load_datasets('mnist')
     train_set, val_set = torch.utils.data.random_split(train_set, [50000, 10000])
 
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
-    val_loader = torch.utils.data.DataLoader(val_set, batch_size=batch_size, shuffle=True)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, shuffle=True)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(net.parameters())
-
-    early_stopping = EarlyStopping(net.state_dict(), 'models/cls_mnist_mnist.pt')
-
-    for epoch in range(max_epochs):
-        print(f'Epoch {epoch}')
-        for data, labels in tqdm(train_loader):
-            optimizer.zero_grad()
-            outputs = net(data.cuda())
-            loss = criterion(outputs, labels.cuda())
-            loss.backward()
-            optimizer.step()
-
-        losses = []
-        with torch.no_grad():
-            for data, labels in tqdm(val_loader):
-                outputs = net(data.cuda())
-                loss = criterion(outputs, labels.cuda())
-                losses.append(loss)
-
-        loss = torch.mean(torch.tensor(loss))
-        if early_stopping(loss):
-            break
-
-    losses = []
-    correct = 0.
-    total = 0.
-    with torch.no_grad():
-        for data, labels in test_loader:
-            outputs = net(data.cuda())
-            loss = criterion(outputs, labels.cuda())
-            losses.append(loss)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels.cuda()).sum().item()
-
-    print(f'Accuracy {correct / total}')
+    if train_method is None:
+        standard_train(net, 'models/cls_mnist_mnist.pt', train_set, val_set, test_set,
+                       **kwargs)
+    elif train_method == 'adv_free':
+        writer = SummaryWriter('tensorboard/cls_mnist_mnist_adv_free')
+        adversarial_train_for_free(net,
+                                   'models/cls_mnist_mnist_adv_free.pt',
+                                   train_set,
+                                   val_set,
+                                   test_set,
+                                   writer=writer,
+                                   **kwargs)
 
 
 def eval_network(weights_path, data_root='./', cuda_idx=0):
