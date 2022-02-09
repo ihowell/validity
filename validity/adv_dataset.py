@@ -203,15 +203,26 @@ def load_adv_dataset(dataset, attack, net_type):
     adv_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_adv_{net_type}.npy'
     noisy_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_noise_{net_type}.npy'
 
-    assert clean_ds_path.exists(), f'{clean_ds_path} does not exist'
-    assert adv_ds_path.exists(), f'{adv_ds_path} does not exist'
-    assert noisy_ds_path.exists(), f'{noisy_ds_path} does not exist'
+    # assert clean_ds_path.exists(), f'{clean_ds_path} does not exist'
+    # assert adv_ds_path.exists(), f'{adv_ds_path} does not exist'
+    # assert noisy_ds_path.exists(), f'{noisy_ds_path} does not exist'
+
+    if not clean_ds_path.exists() or not adv_ds_path.exists() or not noisy_ds_path.exists():
+        return False
 
     clean_data = np.load(clean_ds_path)
     adv_data = np.load(adv_ds_path)
     noisy_data = np.load(noisy_ds_path)
 
     return clean_data, adv_data, noisy_data
+
+
+def adv_dataset_exists(dataset, attack, net_type):
+    clean_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_clean_{net_type}.npy'
+    adv_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_adv_{net_type}.npy'
+    noisy_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_noise_{net_type}.npy'
+
+    return clean_ds_path.exists() and adv_ds_path.exists() and noisy_ds_path.exists()
 
 
 def calculate_channel_means(dataset):

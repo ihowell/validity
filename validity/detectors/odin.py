@@ -241,9 +241,14 @@ def load_odin(net_type, in_dataset, out_dataset, magnitude, temperature):
     return torch.load(save_path)
 
 
+def get_best_odin_path(net_type, in_dataset, out_dataset):
+    return pathlib.Path('ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_best.pt')
+
+
 def load_best_odin(net_type, in_dataset, out_dataset):
-    save_path = pathlib.Path('ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_best.pt')
-    assert save_path.exists(), f'{save_path} does not exist'
+    save_path = get_best_odin_path(net_type, in_dataset, out_dataset)
+    if not save_path.exists():
+        return False
     return torch.load(save_path)
 
 

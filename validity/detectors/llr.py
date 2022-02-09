@@ -123,7 +123,7 @@ def train_llr_ood(in_dataset,
     if net_type == 'nvae':
         foreground = load_nvae(foreground_path, batch_size=1)
         background = load_nvae(background_path, batch_size=1)
-    elif net_type == 'mnist':
+    elif net_type == 'mnist_vae':
         foreground = MnistVAE()
         foreground.load_state_dict(torch.load(foreground_path))
         background = MnistVAE()
@@ -189,15 +189,25 @@ def evaluate_llr(in_dataset, out_dataset, mutation_rate):
     print(f'Accuracy: {acc:.4f}')
 
 
+def get_llr_path(in_dataset, out_dataset, mutation_rate):
+    return pathlib.Path(f'ood/llr_{in_dataset}_{out_dataset}_{mutation_rate}_ood.pt')
+
+
+def get_best_llr_path(in_dataset, out_dataset):
+    return pathlib.Path(f'ood/llr_{in_dataset}_{out_dataset}_best_ood.pt')
+
+
 def load_llr(in_dataset, out_dataset, mutation_rate):
-    save_path = pathlib.Path(f'ood/llr_{in_dataset}_{out_dataset}_{mutation_rate}_ood.pt')
-    assert save_path.exists(), f'{save_path} does not exist'
+    save_path = get_llr_path(in_dataset, out_dataset, mutation_rate)
+    if not save_path.exists():
+        return False
     return torch.load(save_path)
 
 
 def load_best_llr(in_dataset, out_dataset):
-    save_path = pathlib.Path(f'ood/llr_{in_dataset}_{out_dataset}_best_ood.pt')
-    assert save_path.exists(), f'{save_path} does not exist'
+    save_path = get_best_llr_path(in_dataset, out_dataset)
+    if not save_path.exists():
+        return False
     return torch.load(save_path)
 
 

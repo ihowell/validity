@@ -517,28 +517,39 @@ def evaluate_best_mahalanobis_ood(net_type, in_dataset, out_dataset):
 def load_mahalanobis_ood(net_type, in_dataset, out_dataset, magnitude):
     save_path = pathlib.Path(
         'ood', f'mahalanobis_ood_{net_type}_{in_dataset}_{out_dataset}_{magnitude}.pt')
-    assert save_path.exists(), f'{save_path} does not exist'
+    if not save_path.exists():
+        return False
     return torch.load(save_path)
 
 
 def load_mahalanobis_adv(net_type, dataset, adv_attack, magnitude):
     save_path = pathlib.Path(
         'adv', f'mahalanobis_adv_{net_type}_{dataset}_{adv_attack}_{magnitude}.pt')
-    assert save_path.exists(), f'{save_path} does not exist'
+    if not save_path.exists():
+        return False
     return torch.load(save_path)
+
+
+def get_best_mahalanobis_ood_path(net_type, in_dataset, out_dataset):
+    return pathlib.Path('ood',
+                        f'mahalanobis_ood_{net_type}_{in_dataset}_{out_dataset}_best.pt')
 
 
 def load_best_mahalanobis_ood(net_type, in_dataset, out_dataset):
-    save_path = pathlib.Path('ood',
-                             f'mahalanobis_ood_{net_type}_{in_dataset}_{out_dataset}_best.pt')
-    assert save_path.exists(), f'{save_path} does not exist'
+    save_path = get_best_mahalanobis_ood_path(net_type, in_dataset, out_dataset)
+    if not save_path.exists():
+        return False
     return torch.load(save_path)
 
 
+def get_best_mahalanobis_adv_path(net_type, dataset, adv_attack):
+    return pathlib.Path('adv', f'mahalanobis_adv_{net_type}_{dataset}_{adv_attack}_best.pt')
+
+
 def load_best_mahalanobis_adv(net_type, dataset, adv_attack):
-    save_path = pathlib.Path('adv',
-                             f'mahalanobis_adv_{net_type}_{dataset}_{adv_attack}_best.pt')
-    assert save_path.exists(), f'{save_path} does not exist'
+    save_path = get_best_mahalanobis_adv_path(net_type, dataset, adv_attack)
+    if not save_path.exists():
+        return False
     return torch.load(save_path)
 
 

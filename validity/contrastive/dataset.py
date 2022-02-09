@@ -53,8 +53,9 @@ def make_contrastive_dataset(contrastive_type,
     example_labels = np.concatenate(example_labels)
 
     Path('data').mkdir(exist_ok=True)
-    np.savez(f'data/{contrastive_type}_{generator_net_type}_{dataset}.npz', examples,
-             example_labels)
+    save_path = get_contrastive_dataset_path(contrastive_type, dataset, classifier_net_type,
+                                             generator_net_type)
+    np.savez(str(save_path), examples, example_labels)
 
 
 def _make_contrastive_dataset_job(contrastive_type,
@@ -174,6 +175,12 @@ def _make_contrastive_dataset_job(contrastive_type,
     np.savez(
         f'data/tmp/{contrastive_type}_{generator_net_type}_{dataset}_{shard_idx}_{shards}.npz',
         examples, example_labels)
+
+
+def get_contrastive_dataset_path(contrastive_type, dataset, classifier_net_type,
+                                 generator_net_type):
+    return Path(
+        f'data/{contrastive_type}_{dataset}_{classifier_net_type}_{generator_net_type}.npz')
 
 
 if __name__ == '__main__':

@@ -78,7 +78,6 @@ def cdeepex(generator,
             yield i, x_init[i], y_probe_init[i], z_init[i]
 
     data_gen_itr = iter(data_gen())
-
     data = [data for _, data in zip(range(batch_size), data_gen_itr)]
     active_indices, x_start, y_probe, z_start = zip(*data)
 

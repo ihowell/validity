@@ -212,5 +212,16 @@ def train_density_adv(dataset,
     return results
 
 
+def get_density_path(net_type, dataset, adv_attack):
+    return pathlib.Path('adv', f'density_{net_type}_{dataset}_{adv_attack}.pt')
+
+
+def load_density_adv(net_type, dataset, adv_attack):
+    save_path = get_density_path(net_type, dataset, adv_attack)
+    if not save_path.exists():
+        return False
+    return torch.load(save_path)
+
+
 if __name__ == '__main__':
     fire.Fire()

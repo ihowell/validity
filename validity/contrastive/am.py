@@ -1,3 +1,4 @@
+import math
 import inspect
 import time
 import sys
@@ -23,59 +24,88 @@ from validity.datasets import load_datasets
 from validity.generators.load import load_gen, load_encoded_ds
 from validity.util import ZipDataset, get_executor, EarlyStopping
 
+IMPROVE_EPS = 5e-3
+
 
 def am(generator,
        classifier,
-       x_start,
-       y_target,
-       z_start=None,
+       x_init,
+       y_probe_init,
+       z_init=None,
        latent_coef=1e-1,
-       max_steps=1e6,
+       max_steps=1e5,
        writer=None,
        strategy=None,
        seed=None,
        lr=5e-2,
        stopping_patience=2e3,
+       disable_tqdm=True,
+       batch_size=None,
        **kwargs):
     """Performs activation maximization using the generator as an
     approximation of the data manifold.
 
     Args:
         x_start (tf.Tensor): (1HWC)
-        y_target (tf.Tensor): (1)
+        y_probe (tf.Tensor): (1)
 
     """
     max_steps = int(max_steps)
     torch.autograd.set_detect_anomaly(True)
-    x_start = x_start.cuda()
-    if z_start is not None:
-        z_start = z_start.cuda()
+
+    N = x_init.size(0)
+    z_res = [None] * N
+
+    if batch_size is None:
+        batch_size = N
+
+    if z_init is None:
+        z_init = []
+        for i in range(math.ceil(x_init.size(0) / batch_size)):
+            z_init.append(generator.encode(x_init[i * batch_size:(i + 1) * batch_size].cuda()))
+        z_init = torch.cat(z_init).detach_()
     else:
-        z_start = generator.encode(x_start)
+        z_init = z_init.cuda()
+
+    def data_gen():
+        for i in range(x_init.size(0)):
+            yield i, x_init[i], y_probe_init[i], z_init[i]
+
+    data_gen_itr = iter(data_gen())
+    data = [data for _, data in zip(range(batch_size), data_gen_itr)]
+    active_indices, x_start, y_probe, z_start = zip(*data)
+
+    active_indices = torch.tensor(active_indices).cuda()
+    x_start = torch.stack(x_start).cuda()
+    y_probe = torch.stack(y_probe).cuda()
+    z_start = torch.stack(z_start).cuda()
 
     latent_coef = torch.tensor(latent_coef).cuda()
 
     z = z_start.detach().clone().requires_grad_(True)
     x_hat = generator.decode(z)
     y_start = classifier(x_hat).argmax(-1)
+    n = x_start.size(0)
 
     optimizer = optim.SGD([z], lr=lr)
     early_stopping = EarlyStopping(patience=stopping_patience)
 
-    for step in range(max_steps):
+    best_loss = torch.ones(z.size(0)).cuda() * float('Inf')
+    steps_since_best_loss = torch.zeros(z.size(0)).cuda()
+
+    for step in tqdm(range(max_steps), disable=disable_tqdm):
         optimizer.zero_grad()
         x = generator.decode(z)
         logits = classifier(x)
 
         latent_distance = (torch.sum((z_start - z)**2, dim=-1) + 1e-10).sqrt()
         class_logits = []
-        for i in range(y_target.size(0)):
-            class_logits.append(logits[i, y_target[i]])
+        for i in range(y_probe.size(0)):
+            class_logits.append(logits[i, y_probe[i]])
         class_logits = torch.stack(class_logits)
 
         loss = -class_logits + latent_coef * latent_distance
-        loss = loss.mean()
-        loss.backward()
+        loss.sum().backward()
 
         if writer:
             writer.add_scalar('am/loss', loss.mean(), step)
@@ -83,7 +113,7 @@ def am(generator,
             writer.add_scalar('am/latent dist', latent_distance.mean(), step)
             writer.add_scalar('am/classification', torch.argmax(logits, dim=1)[0], step)
             writer.add_scalar('am/logit orig', logits[0, y_start[0].item()], step)
-            writer.add_scalar('am/logit probe', logits[0, y_target[0].item()], step)
+            writer.add_scalar('am/logit probe', logits[0, y_probe[0].item()], step)
 
             sorted_logits = logits.sort(dim=1)[0]
             marginal = sorted_logits[:, -1] - sorted_logits[:, -2]
@@ -93,10 +123,48 @@ def am(generator,
             writer.add_images('am/example', torch.tensor(img), step)
 
         optimizer.step()
-        if early_stopping(loss):
+
+        improved_loss = torch.where(best_loss > 0., (1 - IMPROVE_EPS) * best_loss,
+                                    best_loss - IMPROVE_EPS)
+        best_loss = torch.where(loss < improved_loss, loss, best_loss).detach()
+        steps_since_best_loss = torch.where(loss < improved_loss,
+                                            torch.tensor(0.).cuda(), steps_since_best_loss + 1)
+
+        removals = steps_since_best_loss >= stopping_patience
+
+        if not removals.any():
+            continue
+
+        removal_idx = torch.where(removals)[0]
+
+        for i in removal_idx:
+            print(f'Storing {int(active_indices[i])}')
+            if z_res[int(active_indices[i])] is None:
+                z_res[int(active_indices[i])] = z[i].detach().clone()
+
+        idx_to_keep = torch.tensor([i for i in range(n) if i not in removal_idx]).cuda()
+
+        if idx_to_keep.size(0) == 0:
             break
 
-    return generator.decode(z)
+        z = z[idx_to_keep].detach_()
+        z_start = z_start[idx_to_keep].detach_()
+        y_start = y_start[idx_to_keep].detach_()
+        y_probe = y_probe[idx_to_keep].detach_()
+        active_indices = active_indices[idx_to_keep].detach_()
+        steps_since_best_loss = steps_since_best_loss[idx_to_keep].detach_()
+        best_loss = best_loss[idx_to_keep].detach_()
+
+        n = z.size(0)
+        optimizer = optim.SGD([z], lr=lr)
+
+    for i, idx in enumerate(active_indices):
+        idx = int(idx)
+        if z_res[idx] is None:
+            z_res[idx] = z[i].detach().clone()
+
+    z_res = torch.stack(z_res)
+    return generator.decode(z_res)
 
 
 def run_am(dataset,
@@ -108,6 +176,7 @@ def run_am(dataset,
            cuda_idx=0,
            batch_size=1,
            seed=1,
+           log=True,
            **kwargs):
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(seed)
@@ -121,14 +190,16 @@ def run_am(dataset,
     generator = load_gen(generator_net_type, generator_weights_path, dataset)
     generator.eval()
 
-    for data, label in loader:
-        break
+    load_itr = iter(loader)
+    data, label = next(load_itr)
     target_label = (label + 1) % 10
 
     print('label', label)
     print('target label', target_label)
 
-    writer = SummaryWriter()
+    writer = None
+    if log:
+        writer = SummaryWriter()
     x_hat = am(generator, classifier, data, target_label, writer=writer, **kwargs)
 
     img = x_hat.cpu().detach()

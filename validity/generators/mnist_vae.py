@@ -318,8 +318,10 @@ def encode_dataset(weights_path, batch_size=512, data_root='./datasets/', cuda_i
 
 
 def get_save_path(beta=1., mutation_rate=None, anneal_epochs=None, warm_epochs=None):
+    beta = float(beta)
     save_name = f'vae_mnist_{beta}'
     if mutation_rate:
+        mutation_rate = float(mutation_rate)
         save_name += f'_bg_{mutation_rate}'
     if anneal_epochs:
         save_name += f'_anneal_{anneal_epochs}'

@@ -295,13 +295,19 @@ def train_multiple_lid_adv(dataset,
 
 def load_lid(net_type, dataset, adv_attack, k):
     save_path = pathlib.Path(f'adv/lid_{net_type}_{dataset}_{adv_attack}_{k}.pt')
-    assert save_path.exists(), f'{save_path} does not exist'
+    if not save_path.exists():
+        return None
     return torch.load(save_path)
 
 
+def get_best_lid_path(net_type, dataset, adv_attack):
+    return pathlib.Path(f'adv/lid_{net_type}_{dataset}_{adv_attack}_best.pt')
+
+
 def load_best_lid(net_type, dataset, adv_attack):
-    save_path = pathlib.Path(f'adv/lid_{net_type}_{dataset}_{adv_attack}_best.pt')
-    assert save_path.exists(), f'{save_path} does not exist'
+    save_path = get_best_lid_path(net_type, dataset, adv_attack)
+    if not save_path.exists():
+        return False
     return torch.load(save_path)
 
 

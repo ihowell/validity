@@ -34,12 +34,12 @@ def pre(mnist_vae_kwargs):
             executor.submit(train_mnist_vae, **MNIST_BG_VAE_KWARGS)
 
 
-def main(net_type,
-         in_ds_name,
-         out_ds_name,
-         adv_attacks,
-         data_root='./datasets/',
-         batch_size=64):
+def joint_ood_adv(net_type,
+                  in_ds_name,
+                  out_ds_name,
+                  adv_attacks,
+                  data_root='./datasets/',
+                  batch_size=64):
     torch.cuda.manual_seed(0)
     if type(adv_attacks) == 'str':
         adv_attacks = [adv_attacks]
@@ -128,8 +128,8 @@ def main(net_type,
 
     print(tabulate(results))
     print('')
-    headers = [['OOD Method', 'Adv Method', in_ds_name, out_ds_name] + adv_attacks +
-               ['Combined']]
+    headers = ['OOD Method', 'Adv Method', in_ds_name, out_ds_name
+               ] + adv_attacks + ['Combined']
 
     results = []
     for ood_method, _ in ood_detectors:
@@ -161,8 +161,8 @@ def main(net_type,
             row = [ood_method, adv_method] + [f'{x:.4f}' for x in accuracies]
             results.append(row)
 
-    print(tabulate(results, headers=headers))
+    print(tabulate(results, headers=headers, tablefmt='latex'))
 
 
 if __name__ == '__main__':
-    fire.Fire(main)
+    fire.Fire(joint_ood_adv)
