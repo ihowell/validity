@@ -106,7 +106,8 @@ def _make_contrastive_dataset_job(contrastive_type,
     example_labels = []
 
     if contrastive_type == 'am':
-        for (data, y_true), (encoded_data, _) in tqdm(zip_loader):
+        for i, ((data, y_true), (encoded_data, _)) in enumerate(zip_loader):
+            print(f'Batch {i} / {len(zip_loader)}')
             n = data.size(0)
             tiled_data = data.repeat_interleave(num_labels - 1, dim=0)
             tiled_encoded = encoded_data.repeat_interleave(num_labels - 1, dim=0)
@@ -120,7 +121,8 @@ def _make_contrastive_dataset_job(contrastive_type,
                        classifier,
                        tiled_data,
                        tiled_target,
-                       z_start=tiled_encoded,
+                       z_init=tiled_encoded,
+                       disable_tqdm=False,
                        **kwargs)
             examples.append(x_hat.cpu().detach().numpy())
             example_labels.append(tiled_target.numpy())
