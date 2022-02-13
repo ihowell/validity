@@ -73,11 +73,8 @@ def xgems(generator,
         x = generator.decode(zs)
         logits = classifier(x)
         decode_loss = torch.mean((x_start - x)**2, (1, 2, 3))
-
         class_loss = criterion(logits, y_target.cuda())
-        # loss = class_loss
         loss = decode_loss + class_coef * class_loss
-        loss = loss.mean()
         # loss = class_loss + 1e-4 * torch.relu(initial_log_p - log_p)
         if writer:
             # writer.add_scalar('xgem/log_p', log_p, step)
@@ -95,7 +92,7 @@ def xgems(generator,
             img = torch.cat([x_start, x], 3)
             writer.add_images('xgem/xgem', torch.tensor(img), step)
 
-        loss.backward()
+        loss.sum().backward()
         if writer:
             writer.add_scalar('xgem/zs grad max', zs.grad.max(), step)
         optimizer.step()

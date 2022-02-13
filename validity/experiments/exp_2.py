@@ -44,6 +44,8 @@ def run_experiment(high_performance=False):
     mnist_cls_path = 'models/cls_mnist_mnist.pt'
     adv_attacks = ['fgsm', 'bim', 'cwl2']
     contrastive_methods = ['am', 'xgems', 'cdeepex']
+    gen_types = ['mnist_vae', 'wgan_gp']
+
     vae_path = get_mnist_vae_path(beta=10.)
     mnist_encode_vae_path = Path('data/mnist_vae_encode_mnist_test.npz')
     mnist_encode_wgan_gp_path = Path('data/wgan_gp_encode_mnist_test.npz')
@@ -104,57 +106,60 @@ def run_experiment(high_performance=False):
             make_contrastive_dataset(contrastive_method, 'mnist', 'mnist', mnist_cls_path,
                                      'wgan_gp', wgan_gp_path)
 
+    for contrastive_method in contrastive_methods:
+        if not get_contrastive_dataset_path(contrastive_method, 'mnist', 'mnist',
+                                            'mnist_vae').exists():
+            if not high_performance:
+                raise Exception(
+                    f'Could not find contrastive dataset for method {contrastive_method}. Please run this expeirment in a high-performance setting and set high_performance=True.'
+                )
+
+            make_contrastive_dataset(contrastive_method, 'mnist', 'mnist', mnist_cls_path,
+                                     'mnist_vae', vae_path)
+
     # Evaluate contrastive examples
     results = {}
     for contrastive_method in contrastive_methods:
         results[contrastive_method] = {}
-        for adv_attack in adv_attacks:
-            contrastive_ds_path = get_contrastive_dataset_path(contrastive_method, 'mnist',
-                                                               'mnist', 'wgan_gp')
-            contrastive_res_path = get_eval_res_path(contrastive_method, 'mnist', 'mnist',
-                                                     'fmnist', adv_attack)
-            if not contrastive_res_path.exists():
-                print(f'Evaluating:')
-                print(f'Contrastive method: {contrastive_method}')
-                print(f'Adversarial attack: {adv_attack}')
-                eval_contrastive_ds(contrastive_method,
-                                    contrastive_ds_path,
-                                    'mnist',
-                                    mnist_cls_path,
-                                    'mnist',
-                                    'fmnist',
-                                    adv_attack,
-                                    verbose=True)
+        for gen_type in gen_types:
+            results[contrastive_method][gen_type] = {}
+            for adv_attack in adv_attacks:
+                contrastive_ds_path = get_contrastive_dataset_path(
+                    contrastive_method, 'mnist', 'mnist', 'wgan_gp')
+                contrastive_res_path = get_eval_res_path(contrastive_method, 'mnist', 'mnist',
+                                                         'fmnist', adv_attack)
+                if not contrastive_res_path.exists():
+                    print(f'Evaluating:')
+                    print(f'Contrastive method: {contrastive_method}')
+                    print(f'Adversarial attack: {adv_attack}')
+                    eval_contrastive_ds(contrastive_method,
+                                        contrastive_ds_path,
+                                        'mnist',
+                                        mnist_cls_path,
+                                        'mnist',
+                                        'fmnist',
+                                        adv_attack,
+                                        verbose=True)
 
-            with open(contrastive_res_path) as in_file:
-                results[contrastive_method][adv_attack] = json.load(in_file)
+                with open(contrastive_res_path) as in_file:
+                    results[contrastive_method][gen_type][adv_attack] = json.load(in_file)
 
-    headers = [([''] * 2) + sum([[c] + [''] * 3 for c in contrastive_methods], []),
-               ['OOD Method', 'ADV Method'] +
-               ['TCV', 'ID', 'NAdv', 'CValid'] * len(contrastive_methods)]
+    #headers = [([''] * 2) + sum([[c] + [''] * 3 for c in contrastive_methods], []),
+    #           ['OOD Method', 'ADV Method'] +
+    #           ['TCV', 'ID', 'NAdv', 'CValid'] * len(contrastive_methods)]
+    headers = ['Contrastive Method', 'OOD Method', 'ADV Method', 'TCV', 'ID', 'NAdv', 'CValid']
 
     table = headers
     for adv_attack in adv_attacks:
         rows = []
         for contrastive_method in contrastive_methods:
-            for ood_name in results[contrastive_method][adv_attack]['validity']:
-                res = results[contrastive_method][adv_attack]
-                print(res.keys())
-                for adv_name, valid in results[contrastive_method][adv_attack]['validity'][
-                        ood_name].items():
-                    found = False
-                    for i, entry in enumerate(rows):
-                        if entry[0] == ood_name and entry[1] == adv_name:
-                            entry += [
-                                f'{res["target_class_validity"]:.4f}',
-                                f'{res["ood_validity"][ood_name]:.4f}',
-                                f'{res["adv_validity"][adv_name]:.4f}',
-                                f'{valid:.4f}',
-                            ]
-                            found = True
-                            break
-                    if not found:
+            for gen_type in gen_types:
+                for ood_name in results[contrastive_method][adv_attack]['validity']:
+                    res = results[contrastive_method][adv_attack]
+                    for adv_name, valid in results[contrastive_method][adv_attack]['validity'][
+                            ood_name].items():
                         rows.append([
+                            contrastive_method + ' ' + gen_type,
                             ood_name,
                             adv_name,
                             f'{res["target_class_validity"]:.4f}',
