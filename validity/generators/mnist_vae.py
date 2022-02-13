@@ -315,7 +315,7 @@ def encode_dataset(weights_path, batch_size=512, data_root='./datasets/', cuda_i
     test_labels = np.concatenate(test_labels)
 
     pathlib.Path('data').mkdir(exist_ok=True)
-    np.savez(f'data/vae_encode_mnist_test.npz', test_data, test_labels)
+    np.savez(f'data/mnist_vae_encode_mnist_test.npz', test_data, test_labels)
 
 
 def get_save_path(beta=1., mutation_rate=None, anneal_epochs=None, warm_epochs=None, id=None):
