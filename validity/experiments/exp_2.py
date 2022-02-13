@@ -18,8 +18,8 @@ from validity.detectors.mahalanobis import MahalanobisDetector, \
     get_best_mahalanobis_ood_path, get_best_mahalanobis_adv_path, \
     train_multiple_mahalanobis_adv, train_multiple_mahalanobis_ood
 from validity.generators.mnist_vae import train as train_mnist_vae, \
-    get_save_path as get_mnist_vae_path
-from validity.generators.wgan_gp import train as train_wgan_gp
+    get_save_path as get_mnist_vae_path, encode_dataset as mnist_vae_encode_dataset
+from validity.generators.wgan_gp import train as train_wgan_gp, encode_dataset as wgan_gp_encode_dataset
 
 from .eval_contrastive import eval_contrastive_ds, get_eval_res_path
 
@@ -45,7 +45,9 @@ def run_experiment(high_performance=False):
     adv_attacks = ['fgsm', 'bim', 'cwl2']
     contrastive_methods = ['am', 'xgems', 'cdeepex']
     vae_path = get_mnist_vae_path(beta=10.)
-    wgan_gp_path = 'models/wgan_gp_mnist_lam_10_iter_5.pt'
+    mnist_encode_vae_path = Path('data/mnist_vae_encode_mnist_test.npz')
+    mnist_encode_wgan_gp_path = Path('data/wgan_gp_encode_mnist_test.npz')
+    wgan_gp_path = Path('models/wgan_gp_mnist_lam_10_iter_5.pt')
     eval_vae_path = get_mnist_vae_path(beta=20., id='eval')
     eval_bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3, id='eval')
 
@@ -78,6 +80,17 @@ def run_experiment(high_performance=False):
                'mnist', 'mnist', mnist_cls_path, adv_attack)
         c_func(get_best_mahalanobis_adv_path('mnist', 'mnist', adv_attack),
                train_multiple_mahalanobis_adv, 'mnist', 'mnist', mnist_cls_path, adv_attack)
+
+    # Encode datasets
+    if not mnist_encode_vae_path.exists():
+        if not high_performance:
+            raise Exception(f'High-performance required to run to encode dataset.')
+        mnist_vae_encode_dataset(vae_path)
+
+    if not mnist_encode_wgan_gp_path.exists():
+        if not high_performance:
+            raise Exception(f'High-performance required to run to encode dataset.')
+        wgan_gp_encode_dataset(wgan_gp_path)
 
     # Create contrastive examples
     for contrastive_method in contrastive_methods:
