@@ -291,7 +291,12 @@ def train_multiple_bg(mutation_rates, **kwargs):
         train(mutation_rate=mutation_rate, **kwargs)
 
 
-def encode_dataset(weights_path, batch_size=512, data_root='./datasets/', cuda_idx=0, seed=0):
+def encode_dataset(weights_path,
+                   batch_size=512,
+                   data_root='./datasets/',
+                   cuda_idx=0,
+                   seed=0,
+                   id=None):
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -315,7 +320,10 @@ def encode_dataset(weights_path, batch_size=512, data_root='./datasets/', cuda_i
     test_labels = np.concatenate(test_labels)
 
     pathlib.Path('data').mkdir(exist_ok=True)
-    np.savez(f'data/mnist_vae_encode_mnist_test.npz', test_data, test_labels)
+    save_path = 'mnist_vae_encode_mnist_test'
+    if id:
+        save_path += f'_{id}'
+    np.savez(f'data/{save_path}.npz', test_data, test_labels)
 
 
 def get_save_path(beta=1., mutation_rate=None, anneal_epochs=None, warm_epochs=None, id=None):

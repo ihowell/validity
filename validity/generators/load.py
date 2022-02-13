@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import torch
 
 from validity.util import NPZDataset
@@ -37,7 +39,15 @@ def load_gen(gen_type, weights_path, dataset):
     return generator
 
 
-def load_encoded_ds(dataset, gen_type, encode_dir=None):
+def load_encoded_ds(dataset, gen_type, encode_dir=None, id=None):
+    ds_path = get_encoded_ds_path(dataset, gen_type, encode_dir=None, id=None)
+    return NPZDataset(ds_path)
+
+
+def get_encoded_ds_path(dataset, gen_type, encode_dir=None, id=None):
     if encode_dir is None:
         encode_dir = 'data'
-    return NPZDataset(f'{encode_dir}/{gen_type}_encode_{dataset}_test.npz')
+    save_path = f'{gen_type}_encode_{dataset}_test'
+    if id:
+        save_path += f'_{id}'
+    return Path(f'{encode_dir}/{save_path}.npz')

@@ -8,8 +8,8 @@ from tqdm import tqdm
 
 from validity.classifiers import load_cls
 from validity.datasets import load_datasets
-from validity.generators.load import load_gen, load_encoded_ds
-from validity.util import ZipDataset, get_executor
+from validity.generators.load import load_gen, load_encoded_ds, get_encoded_ds_path
+from validity.util import get_executor
 
 from .am import am
 from .cdeepex import cdeepex
@@ -79,20 +79,31 @@ def _make_contrastive_dataset_job(contrastive_type,
 
     print('Loading datasets')
     _, test_ds = load_datasets(dataset)
-    encoded_test_ds = load_encoded_ds(dataset, generator_net_type)
+    encoded_test_ds = None
+    if get_encoded_ds_path(dataset, generator_net_type).exists():
+        print('Using cached encoded dataset')
+        encoded_test_ds = load_encoded_ds(dataset, generator_net_type)
+    else:
+        print('No cached encoded dataset found')
 
     if dry_run_size:
         test_ds = torch.utils.data.Subset(test_ds, range(dry_run_size))
-        encoded_test_ds = torch.utils.data.Subset(encoded_test_ds, range(dry_run_size))
-
-    zip_ds = ZipDataset(test_ds, encoded_test_ds)
+        if encoded_test_ds:
+            encoded_test_ds = torch.utils.data.Subset(encoded_test_ds, range(dry_run_size))
 
     print('Sharding dataset')
-    n = len(zip_ds)
+    n = len(test_ds)
     shard_lower = (n * shard_idx) // shards
     shard_upper = (n * (shard_idx + 1)) // shards
-    zip_ds = torch.utils.data.Subset(zip_ds, range(shard_lower, shard_upper))
-    zip_loader = torch.utils.data.DataLoader(zip_ds, batch_size=batch_size, shuffle=False)
+    test_ds = torch.utils.data.Subset(test_ds, range(shard_lower, shard_upper))
+    test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False)
+    if encoded_test_ds:
+        encoded_test_ds = torch.utils.data.Subset(encoded_test_ds,
+                                                  range(shard_lower, shard_upper))
+        encoded_test_loader = torch.utils.data.DataLoader(encoded_test_ds,
+                                                          batch_size=batch_size,
+                                                          shuffle=False)
+        encoded_iter = iter(encoded_test_loader)
 
     print('Loading classifier')
     classifier = load_cls(classifier_net_type, classifier_weights_path, dataset)
@@ -106,11 +117,14 @@ def _make_contrastive_dataset_job(contrastive_type,
     example_labels = []
 
     if contrastive_type == 'am':
-        for i, ((data, y_true), (encoded_data, _)) in enumerate(zip_loader):
-            print(f'Batch {i} / {len(zip_loader)}')
+        for i, (data, y_true) in enumerate(test_loader):
+            print(f'Batch {i} / {len(test_loader)}')
             n = data.size(0)
             tiled_data = data.repeat_interleave(num_labels - 1, dim=0)
-            tiled_encoded = encoded_data.repeat_interleave(num_labels - 1, dim=0)
+            tiled_encoded = None
+            if encoded_test_ds:
+                encoded_data_ = next(encoded_iter)[0]
+                tiled_encoded = encoded_data.repeat_interleave(num_labels - 1, dim=0)
 
             y_true = classifier(data.cuda()).argmax(-1)
             tiled_target = torch.tensor([[i for i in range(num_labels) if i != y_true[j]]
@@ -128,17 +142,22 @@ def _make_contrastive_dataset_job(contrastive_type,
             example_labels.append(tiled_target.numpy())
 
     elif contrastive_type == 'cdeepex':
-        data, encoded_data = [], []
-        for (d, _), (enc_d, _) in tqdm(zip_loader, desc='Collecting data'):
+        data = []
+        encoded_data = [] if encoded_test_ds else None
+        for (d, _), (enc_d, _) in tqdm(test_loader, desc='Collecting data'):
             data.append(d)
-            encoded_data.append(enc_d)
+            if encoded_test_ds:
+                encoded_data.append(next(encoded_iter)[0])
         data = torch.cat(data)
-        encoded_data = torch.cat(encoded_data)
+        if encoded_test_ds:
+            encoded_data = torch.cat(encoded_data)
 
         print('Tiling data')
         n = data.size(0)
         tiled_data = data.repeat_interleave(num_labels - 1, dim=0)
-        tiled_encoded = encoded_data.repeat_interleave(num_labels - 1, dim=0)
+        tiled_encoded = None
+        if encoded_test_ds:
+            tiled_encoded = encoded_data.repeat_interleave(num_labels - 1, dim=0)
 
         y_true = classifier(data.cuda()).argmax(-1)
         tiled_target = torch.tensor([[i for i in range(num_labels) if i != y_true[j]]
@@ -158,7 +177,11 @@ def _make_contrastive_dataset_job(contrastive_type,
         example_labels = [tiled_target.numpy()]
 
     elif contrastive_type == 'xgems':
-        for (data, label), (encoded_data, _) in tqdm(zip_loader):
+        for data, label in tqdm(test_loader):
+            encoded_data = None
+            if encoded_test_ds:
+                encoded_data = next(encoded_iter)[0]
+
             for target_label in range(num_labels):
                 if target_label == label:
                     continue
