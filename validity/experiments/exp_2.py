@@ -43,21 +43,20 @@ def c_adv_dataset(dataset, adv_attack, net_type, cls_path):
 def run_experiment(high_performance=False):
     mnist_cls_path = 'models/cls_mnist_mnist.pt'
     adv_attacks = ['fgsm', 'bim', 'cwl2']
-    contrastive_methods = ['xgems', 'cdeepex']
-    vae_path = get_mnist_vae_path(beta=20.)
-    bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3)
+    contrastive_methods = ['am', 'xgems', 'cdeepex']
+    vae_path = get_mnist_vae_path(beta=10.)
+    wgan_gp_path = 'models/wgan_gp_mnist_lam_10_iter_5.pt'
+    eval_vae_path = get_mnist_vae_path(beta=20., id='eval')
+    eval_bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3, id='eval')
 
     # Train classifiers
     c_func(mnist_cls_path, train_mnist_cls)
 
     # Train generative functions
-    c_func(vae_path, train_mnist_vae, beta=20.)
-    c_func(bg_vae_path, train_mnist_vae, beta=20., mutation_rate=0.3)
-    c_func('models/wgan_gp_mnist_lam_10_iter_5.pt',
-           train_wgan_gp,
-           'mnist',
-           lambda_term=10.,
-           critic_iter=5)
+    c_func(wgan_gp_path, train_wgan_gp, 'mnist', lambda_term=10., critic_iter=5)
+    c_func(vae_path, train_mnist_vae, beta=10.)
+    c_func(eval_vae_path, train_mnist_vae, beta=20., id='eval')
+    c_func(eval_bg_vae_path, train_mnist_vae, beta=20., mutation_rate=0.3, id='eval')
 
     # Create adversarial datasets
     for adv_attack in adv_attacks:
@@ -67,7 +66,7 @@ def run_experiment(high_performance=False):
     c_func(get_best_odin_path('mnist', 'mnist', 'fmnist'), train_multiple_odin, 'mnist',
            'fmnist', 'mnist', mnist_cls_path)
     c_func(get_llr_path('mnist', 'fmnist', 0.3), train_llr_ood, 'mnist', 'fmnist', 'mnist_vae',
-           vae_path, bg_vae_path, 0.3)
+           eval_vae_path, eval_bg_vae_path, 0.3)
     c_func(get_best_mahalanobis_ood_path('mnist', 'mnist', 'fmnist'),
            train_multiple_mahalanobis_ood, 'mnist', 'fmnist', 'mnist', mnist_cls_path)
 
@@ -90,7 +89,7 @@ def run_experiment(high_performance=False):
                 )
 
             make_contrastive_dataset(contrastive_method, 'mnist', 'mnist', mnist_cls_path,
-                                     'wgan_gp', 'gan/mnist.pt')
+                                     'wgan_gp', wgan_gp_path)
 
     # Evaluate contrastive examples
     results = {}
@@ -117,28 +116,42 @@ def run_experiment(high_performance=False):
             with open(contrastive_res_path) as in_file:
                 results[contrastive_method][adv_attack] = json.load(in_file)
 
-    table = []
+    headers = [([''] * 2) + sum([[c] + [''] * 3 for c in contrastive_methods], []),
+               ['OOD Method', 'ADV Method'] +
+               ['TCV', 'ID', 'NAdv', 'CValid'] * len(contrastive_methods)]
+
+    table = headers
     for adv_attack in adv_attacks:
         rows = []
         for contrastive_method in contrastive_methods:
             for ood_name in results[contrastive_method][adv_attack]['validity']:
+                res = results[contrastive_method][adv_attack]
+                print(res.keys())
                 for adv_name, valid in results[contrastive_method][adv_attack]['validity'][
                         ood_name].items():
                     found = False
                     for i, entry in enumerate(rows):
-                        if entry['OOD Method'] == ood_name and entry['ADV Method'] == adv_name:
-                            entry[contrastive_method] = f'{valid*100:.2f}%'
+                        if entry[0] == ood_name and entry[1] == adv_name:
+                            entry += [
+                                f'{res["target_class_validity"]:.4f}',
+                                f'{res["ood_validity"][ood_name]:.4f}',
+                                f'{res["adv_validity"][adv_name]:.4f}',
+                                f'{valid:.4f}',
+                            ]
                             found = True
                             break
                     if not found:
-                        rows.append({
-                            'OOD Method': ood_name,
-                            'ADV Method': adv_name,
-                            contrastive_method: f'{valid*100:.2f}%'
-                        })
+                        rows.append([
+                            ood_name,
+                            adv_name,
+                            f'{res["target_class_validity"]:.4f}',
+                            f'{res["ood_validity"][ood_name]:.4f}',
+                            f'{res["adv_validity"][adv_name]:.4f}',
+                            f'{valid:.4f}',
+                        ])
         table = table + rows
 
-    print(tabulate(table, headers='keys', tablefmt='latex'))
+    print(tabulate(table, tablefmt='tsv', floatfmt='.4f'))
 
 
 if __name__ == '__main__':

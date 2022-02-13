@@ -158,8 +158,10 @@ def _make_contrastive_dataset_job(contrastive_type,
         example_labels = [tiled_target.numpy()]
 
     elif contrastive_type == 'xgems':
-        for (data, _), (encoded_data, _) in tqdm(zip_loader):
+        for (data, label), (encoded_data, _) in tqdm(zip_loader):
             for target_label in range(num_labels):
+                if target_label == label:
+                    continue
                 target_label = torch.tensor(target_label).unsqueeze(0)
                 x_hat = xgems(generator,
                               classifier,
@@ -168,7 +170,7 @@ def _make_contrastive_dataset_job(contrastive_type,
                               z_start=encoded_data,
                               **kwargs)
                 examples.append(x_hat.cpu().detach().numpy())
-                example_labels.append(tiled_label.numpy())
+                example_labels.append(target_label.numpy())
 
     examples = np.concatenate(examples)
     example_labels = np.concatenate(example_labels)

@@ -112,7 +112,7 @@ def eval_contrastive_ds(contrastive_method,
                               adv_attack), 'w') as out_file:
         json.dump(
             {
-                'target_class_vlaidity': float(cls_preds.mean()),
+                'target_class_validity': float(cls_preds.mean()),
                 'validity': results,
                 'adv_validity': adv_validity,
                 'ood_validity': ood_validity,

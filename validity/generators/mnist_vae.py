@@ -148,9 +148,7 @@ class MnistVAE(nn.Module):
         z = prior.rsample()
 
         mu_x_hat = self._decode(z)
-        # sig_x_hat = F.softplus(log_sig_x_hat) + SIG_EPSILON
         sig_x_hat = self.tied_log_sig_x.exp() + SIG_EPSILON
-        # sig_x_hat = log_sig_x_hat.sigmoid() + SIG_EPSILON
         px_hat = dist.normal.Normal(mu_x_hat, sig_x_hat)
         px_hat = dist.independent.Independent(px_hat, 3)
         x_hat = px_hat.rsample().clamp(0., 1.)
@@ -180,7 +178,8 @@ def train(beta=1.,
           cuda_idx=0,
           mutation_rate=None,
           anneal_epochs=None,
-          warm_epochs=None):
+          warm_epochs=None,
+          id=None):
     beta = float(beta)
     vae = MnistVAE(beta=beta)
     vae = vae.cuda()
@@ -197,8 +196,10 @@ def train(beta=1.,
         save_name += f'_anneal_{anneal_epochs}'
     if warm_epochs:
         save_name += f'_warm_{warm_epochs}'
+    if id:
+        save_name += f'_{id}'
 
-    writer = SummaryWriter('models/' + save_name)
+    writer = SummaryWriter('tensorboard/gen/vae/' + save_name)
     save_path = f'models/{save_name}.pt'
 
     optimizer = optim.Adam(vae.parameters(), weight_decay=1e-4)
@@ -317,7 +318,7 @@ def encode_dataset(weights_path, batch_size=512, data_root='./datasets/', cuda_i
     np.savez(f'data/vae_encode_mnist_test.npz', test_data, test_labels)
 
 
-def get_save_path(beta=1., mutation_rate=None, anneal_epochs=None, warm_epochs=None):
+def get_save_path(beta=1., mutation_rate=None, anneal_epochs=None, warm_epochs=None, id=None):
     beta = float(beta)
     save_name = f'vae_mnist_{beta}'
     if mutation_rate:
@@ -327,6 +328,8 @@ def get_save_path(beta=1., mutation_rate=None, anneal_epochs=None, warm_epochs=N
         save_name += f'_anneal_{anneal_epochs}'
     if warm_epochs:
         save_name += f'_warm_{warm_epochs}'
+    if id:
+        save_name += f'_{id}'
     save_path = f'models/{save_name}.pt'
     return save_path
 
