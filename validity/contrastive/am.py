@@ -22,7 +22,7 @@ from tensorboardX import SummaryWriter
 from validity.classifiers import load_cls
 from validity.datasets import load_datasets
 from validity.generators.load import load_gen, load_encoded_ds
-from validity.util import ZipDataset, get_executor, EarlyStopping
+from validity.util import ZipDataset, get_executor
 
 IMPROVE_EPS = 5e-3
 
@@ -88,7 +88,6 @@ def am(generator,
     n = x_start.size(0)
 
     optimizer = optim.SGD([z], lr=lr)
-    early_stopping = EarlyStopping(patience=stopping_patience)
 
     best_loss = torch.ones(z.size(0)).cuda() * float('Inf')
     steps_since_best_loss = torch.zeros(z.size(0)).cuda()

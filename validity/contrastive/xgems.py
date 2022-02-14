@@ -2,6 +2,7 @@ import inspect
 import time
 import sys
 import json
+import math
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -20,70 +21,97 @@ from tensorboardX import SummaryWriter
 from validity.classifiers import load_cls
 from validity.datasets import load_datasets
 from validity.generators.load import load_gen, load_encoded_ds
-from validity.util import ZipDataset, get_executor
+from validity.util import get_executor
+
+IMPROVE_EPS = 5e-3
 
 
 def xgems(generator,
           classifier,
-          x_start,
-          y_target,
-          z_start=None,
+          x_init,
+          y_probe_init,
+          batch_size=None,
+          z_init=None,
           class_coef=1.0,
           writer=None,
           strategy=None,
           seed=None,
-          **kwargs):
+          max_steps=1e5,
+          lr=1e-2,
+          stopping_patience=2e3,
+          disable_tqdm=True):
     """Performs activation maximization using the generator as an
     approximation of the data manifold.
 
     Args:
-        x_start (tf.Tensor): (1HWC)
-        y_target (tf.Tensor): (1)
+        x_start (tf.Tensor): (NHWC)
+        y_target (tf.Tensor): (N)
 
     """
-    x_start = x_start.cuda()
-    if z_start is not None:
-        if type(z_start) is list:
-            zs_init = [z.cuda() for z in z_start]
-        else:
-            zs_init = z_start.cuda()
+    max_steps = int(max_steps)
+    torch.autograd.set_detect_anomaly(True)
+
+    N = x_init.size(0)
+    z_res = [None] * N
+
+    if batch_size is None:
+        batch_size = N
+
+    if z_init is None:
+        z_init = []
+        for i in range(math.ceil(x_init.size(0) / batch_size)):
+            z_init.append(generator.encode(x_init[i * batch_size:(i + 1) * batch_size].cuda()))
+        z_init = torch.cat(z_init).detach_()
     else:
-        zs_init = generator.encode(x_start)
+        z_init = z_init.cuda()
+
+    def data_gen():
+        for i in range(x_init.size(0)):
+            yield i, x_init[i], y_probe_init[i], z_init[i]
+
+    data_gen_itr = iter(data_gen())
+    data = [data for _, data in zip(range(batch_size), data_gen_itr)]
+    active_indices, x_start, y_probe, z_start = zip(*data)
+
+    active_indices = torch.tensor(active_indices).cuda()
+    x_start = torch.stack(x_start).cuda()
+    y_probe = torch.stack(y_probe).cuda()
+    z_start = torch.stack(z_start).cuda()
 
     class_coef = torch.tensor(class_coef).cuda()
 
-    if type(zs_init) is list:
-        zs = [z.detach().clone().requires_grad_(True) for z in zs_init]
-    else:
-        zs = zs_init.detach().clone().requires_grad_(True)
-    x_reencode_start = generator.decode(zs)
-    #initial_log_p = initial_log_p.clone().detach()
+    z = z_start.detach().clone().requires_grad_(True)
+    x_hat = generator.decode(z)
+    y_start = classifier(x_hat).argmax(-1)
+    n = x_start.size(0)
+
+    optimizer = optim.SGD([z], lr=lr)
     criterion = nn.CrossEntropyLoss()
-    y_start = torch.argmax(classifier(x_reencode_start), 1)
 
-    optim_lr = 1e-2
-    weight_decay = 1e-5
-    if type(zs) is list:
-        optimizer = optim.Adam(zs[0:1], lr=optim_lr, weight_decay=weight_decay)
-    else:
-        optimizer = optim.SGD([zs], lr=optim_lr)  #, weight_decay=weight_decay)
+    best_loss = torch.ones(z.size(0)).cuda() * float('Inf')
+    steps_since_best_loss = torch.zeros(z.size(0)).cuda()
 
-    for step in range(2000):
+    for step in tqdm(range(max_steps), disable=disable_tqdm):
         optimizer.zero_grad()
-        x = generator.decode(zs)
+        x = generator.decode(z)
         logits = classifier(x)
+
         decode_loss = torch.mean((x_start - x)**2, (1, 2, 3))
-        class_loss = criterion(logits, y_target.cuda())
+        if logits.size(0) != y_probe.size(0):
+            print(f'{z.shape=}')
+            print(f'{x.shape=}')
+            print(f'{logits.shape=}')
+            print(f'{y_probe.shape=}')
+        class_loss = criterion(logits, y_probe)
+
         loss = decode_loss + class_coef * class_loss
-        # loss = class_loss + 1e-4 * torch.relu(initial_log_p - log_p)
+
         if writer:
-            # writer.add_scalar('xgem/log_p', log_p, step)
             writer.add_scalar('xgem/loss', loss.mean(), step)
             writer.add_scalar('xgem/class loss', class_loss.mean(), step)
             writer.add_scalar('xgem/decode loss', decode_loss.mean(), step)
-            # writer.add_scalar('xgem/classification', torch.argmax(logits, dim=1)[0], step)
             writer.add_scalar('xgem/logit orig', logits[0, y_start[0].item()], step)
-            writer.add_scalar('xgem/logit probe', logits[0, y_target[0].item()], step)
+            writer.add_scalar('xgem/logit probe', logits[0, y_probe[0].item()], step)
 
             sorted_logits = logits.sort(dim=1)[0]
             marginal = sorted_logits[:, -1] - sorted_logits[:, -2]
@@ -94,10 +122,51 @@ def xgems(generator,
 
         loss.sum().backward()
         if writer:
-            writer.add_scalar('xgem/zs grad max', zs.grad.max(), step)
+            writer.add_scalar('xgem/z grad max', z.grad.max(), step)
         optimizer.step()
 
-    return generator.decode(zs)
+        improved_loss = torch.where(best_loss > 0., (1 - IMPROVE_EPS) * best_loss,
+                                    best_loss - IMPROVE_EPS)
+        best_loss = torch.where(loss < improved_loss, loss, best_loss).detach()
+        steps_since_best_loss = torch.where(loss < improved_loss,
+                                            torch.tensor(0.).cuda(), steps_since_best_loss + 1)
+
+        removals = steps_since_best_loss >= stopping_patience
+
+        if not removals.any():
+            continue
+
+        removal_idx = torch.where(removals)[0]
+
+        for i in removal_idx:
+            print(f'Storing {int(active_indices[i])}')
+            if z_res[int(active_indices[i])] is None:
+                z_res[int(active_indices[i])] = z[i].detach().clone()
+
+        idx_to_keep = torch.tensor([i for i in range(n) if i not in removal_idx]).cuda()
+
+        if idx_to_keep.size(0) == 0:
+            break
+
+        z = z[idx_to_keep].detach_().requires_grad_()
+        z_start = z_start[idx_to_keep].detach_()
+        x_start = x_start[idx_to_keep].detach_()
+        y_start = y_start[idx_to_keep].detach_()
+        y_probe = y_probe[idx_to_keep].detach_()
+        active_indices = active_indices[idx_to_keep].detach_()
+        steps_since_best_loss = steps_since_best_loss[idx_to_keep].detach_()
+        best_loss = best_loss[idx_to_keep].detach_()
+
+        n = z.size(0)
+        optimizer = optim.SGD([z], lr=lr)
+
+    for i, idx in enumerate(active_indices):
+        idx = int(idx)
+        if z_res[idx] is None:
+            z_res[idx] = z[i].detach().clone()
+
+    z_res = torch.stack(z_res)
+    return generator.decode(z_res)
 
 
 def run_xgems(dataset,

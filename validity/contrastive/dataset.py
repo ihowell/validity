@@ -177,23 +177,29 @@ def _make_contrastive_dataset_job(contrastive_type,
         example_labels = [tiled_target.numpy()]
 
     elif contrastive_type == 'xgems':
-        for data, label in tqdm(test_loader):
-            encoded_data = None
+        for i, (data, label) in enumerate(test_loader):
+            print(f'Batch {i} / {len(test_loader)}')
+            n = data.size(0)
+            tiled_data = data.repeat_interleave(num_labels - 1, dim=0)
+            tiled_encoded = None
             if encoded_test_ds:
-                encoded_data = next(encoded_iter)[0]
+                encoded_data_ = next(encoded_iter)[0]
+                tiled_encoded = encoded_data.repeat_interleave(num_labels - 1, dim=0)
 
-            for target_label in range(num_labels):
-                if target_label == label:
-                    continue
-                target_label = torch.tensor(target_label).unsqueeze(0)
-                x_hat = xgems(generator,
-                              classifier,
-                              data,
-                              target_label,
-                              z_start=encoded_data,
-                              **kwargs)
-                examples.append(x_hat.cpu().detach().numpy())
-                example_labels.append(target_label.numpy())
+            y_true = classifier(data.cuda()).argmax(-1)
+            tiled_target = torch.tensor([[i for i in range(num_labels) if i != y_true[j]]
+                                         for j in range(n)])
+            tiled_target = tiled_target.reshape(-1)
+
+            x_hat = xgems(generator,
+                          classifier,
+                          tiled_data,
+                          tiled_target,
+                          z_init=tiled_encoded,
+                          disable_tqdm=False,
+                          **kwargs)
+            examples.append(x_hat.cpu().detach().numpy())
+            example_labels.append(tiled_target.numpy())
 
     examples = np.concatenate(examples)
     example_labels = np.concatenate(example_labels)
