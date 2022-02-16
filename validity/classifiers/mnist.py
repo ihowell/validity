@@ -68,6 +68,24 @@ class MnistClassifier(nn.Module):
         out = self.dense(out)
         return out, features
 
+    def post_relu_features(self, x):
+        features = []
+        out = x
+        out = self.transform(out)
+        out = self.conv1(out)
+        out = F.max_pool2d(out, 2)
+        out = torch.relu(out)
+        features.append(out)
+
+        out = self.conv2(out)
+        out = F.max_pool2d(out, 2)
+        out = torch.relu(out)
+        features.append(out)
+
+        out = torch.flatten(out, 1)
+        out = self.dense(out)
+        return out, features
+
     def intermediate_forward(self, x, layer_idx):
         out = x
         out = self.transform(out)
