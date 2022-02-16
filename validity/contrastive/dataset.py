@@ -144,7 +144,7 @@ def _make_contrastive_dataset_job(contrastive_type,
     elif contrastive_type == 'cdeepex':
         data = []
         encoded_data = [] if encoded_test_ds else None
-        for (d, _), (enc_d, _) in tqdm(test_loader, desc='Collecting data'):
+        for d, _ in tqdm(test_loader, desc='Collecting data'):
             data.append(d)
             if encoded_test_ds:
                 encoded_data.append(next(encoded_iter)[0])
