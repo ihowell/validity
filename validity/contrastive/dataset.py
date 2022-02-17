@@ -144,7 +144,7 @@ def _make_contrastive_dataset_job(contrastive_type,
     elif contrastive_type == 'cdeepex':
         data = []
         encoded_data = [] if encoded_test_ds else None
-        for (d, _), (enc_d, _) in tqdm(test_loader, desc='Collecting data'):
+        for d, _ in tqdm(test_loader, desc='Collecting data'):
             data.append(d)
             if encoded_test_ds:
                 encoded_data.append(next(encoded_iter)[0])
@@ -171,6 +171,7 @@ def _make_contrastive_dataset_job(contrastive_type,
                         tiled_target,
                         num_labels,
                         z_init=tiled_encoded,
+                        batch_size=batch_size,
                         **kwargs)
 
         examples = [x_hat.cpu().detach().numpy()]
