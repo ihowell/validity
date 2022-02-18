@@ -1,34 +1,58 @@
+"""
+Academic code for detecting adversarial and OOD data with activation patterns, with visualization
+"""
+# pylint: disable=invalid-name
 import csv
 
 import fire
-import numpy as np
-import pathlib
-import torch
-
-from tabulate import tabulate
-from tqdm import tqdm
-from torchvision import datasets, transforms
-from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
-from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
-
+from pathlib import Path
+import numpy as np
+import torch
+from sklearn.metrics import auc, roc_curve
+from tqdm import tqdm
 from validity.adv_dataset import load_adv_dataset
 from validity.classifiers import load_cls
 from validity.datasets import load_datasets
 from validity.util import np_loader
 
+# Doesn't affect results in any way, only performance
+BATCH_SIZE = 128
+ROOT_DATA_PATH = Path('.')
+CALCULATED_ACTIVATION_MEANS_PATH = ROOT_DATA_PATH / 'calculated_activation_means.csv'
 
-def activation_test(cls_type,
-                    cls_weights_path,
-                    in_ds_name,
-                    out_ds_name,
-                    adv_attacks,
-                    data_root='./datasets/',
-                    batch_size=64):
+
+def calculate_features(dataloader, cls, tqdm_description="Calculating features"):
+    """
+    Args: TODO
+        dataloader:
+        cls:
+        tqdm_description:
+    """
+    all_features = []
+    for batch, _ in tqdm(dataloader, desc=tqdm_description):
+        _, features = cls.post_relu_features(batch.cuda())
+        features = [f.flatten(1) for f in features]
+        features = [f.cpu().detach().numpy() for f in features]
+        features = np.concatenate(features, axis=1)
+        all_features.append(features)
+    return np.concatenate(all_features)
+
+
+def activation_test(cls_type, cls_weights_path, in_ds_name, out_ds_name, adv_attacks):
+    """
+    Args: TODO
+        cls_type: ???
+        cls_weights_path: ???
+        in_ds_name: ???
+        out_ds_name: ???
+        adv_attacks: ???
+    """
     torch.cuda.manual_seed(0)
-    if type(adv_attacks) == 'str':
+    if isinstance(adv_attacks, str):
         adv_attacks = [adv_attacks]
 
+    # ???, this seems aggressive
     cls = load_cls(cls_type, cls_weights_path, in_ds_name)
     cls = cls.cuda()
     cls.eval()
@@ -37,44 +61,24 @@ def activation_test(cls_type,
     _, in_test_ds = load_datasets(in_ds_name)
     _, out_test_ds = load_datasets(out_ds_name)
     in_test_loader = torch.utils.data.DataLoader(in_test_ds,
-                                                 batch_size=batch_size,
+                                                 batch_size=BATCH_SIZE,
                                                  shuffle=False)
     out_test_loader = torch.utils.data.DataLoader(out_test_ds,
-                                                  batch_size=batch_size,
+                                                  batch_size=BATCH_SIZE,
                                                   shuffle=False)
 
-    in_features = []
-    for batch, _ in tqdm(in_test_loader, desc='In test set'):
-        _, features = cls.post_relu_features(batch.cuda())
-        features = [f.flatten(1) for f in features]
-        features = [f.cpu().detach().numpy() for f in features]
-        features = np.concatenate(features, axis=1)
-        in_features.append(features)
-    in_features = np.concatenate(in_features)
-
-    out_features = []
-    for batch, _ in tqdm(out_test_loader, desc='Out test set'):
-        _, features = cls.post_relu_features(batch.cuda())
-        features = [f.flatten(1) for f in features]
-        features = [f.cpu().detach().numpy() for f in features]
-        features = np.concatenate(features, axis=1)
-        out_features.append(features)
-    out_features = np.concatenate(out_features)
+    in_features = calculate_features(in_test_loader, cls,
+                                     "Calculating features of out test set")
+    out_features = calculate_features(out_test_loader, cls,
+                                      "Calculating features of out test set")
 
     adv_feature_means = []
     for adv_attack in adv_attacks:
         _, adv_data, _ = load_adv_dataset(in_ds_name, adv_attack, cls_type)
         adv_loader = np_loader(adv_data, False)
 
-        adv_features = []
-        for batch, _ in tqdm(adv_loader, desc=f'{adv_attack} test set'):
-            _, features = cls.post_relu_features(batch.cuda())
-            features = [f.flatten(1) for f in features]
-            features = [f.cpu().detach().numpy() for f in features]
-            features = np.concatenate(features, axis=1)
-            adv_features.append(features)
-        adv_features = np.concatenate(adv_features)
-
+        adv_features = calculate_features(adv_loader, cls,
+                                          "Calculating features of adv test set")
         adv_features = np.where(adv_features > 0., 1., 0.)
         adv_feature_means.append(np.mean(adv_features, axis=0))
 
@@ -93,7 +97,7 @@ def activation_test(cls_type,
     print(f'{np.sum(np.where(in_feature_mean == 1., 1., 0.))=}')
     print(f'{np.sum(np.where(in_feature_mean == 0., 1., 0.))=}')
 
-    with open('activ_means.csv', 'w') as csvfile:
+    with open(CALCULATED_ACTIVATION_MEANS_PATH, 'w', encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(['Position', 'In Activation', 'Out Activation'] + adv_attacks +
                         ['Out Diff'] + [f'{a} Diff' for a in adv_attacks])
@@ -107,16 +111,17 @@ def activation_test(cls_type,
             writer.writerow(row)
 
 
-def activation_detector(cls_type,
-                        cls_weights_path,
-                        in_ds_name,
-                        out_ds_name,
-                        adv_attacks,
-                        data_root='./datasets/',
-                        batch_size=64,
-                        sample_variances=1):
+def activation_detector(cls_type, cls_weights_path, in_ds_name, out_ds_name, adv_attacks):
+    """
+    Args: TODO
+        cls_type: ???
+        cls_weights_path: ???
+        in_ds_name: ???
+        out_ds_name: ???
+        adv_attacks: ???
+    """
     torch.cuda.manual_seed(0)
-    if type(adv_attacks) == 'str':
+    if isinstance(adv_attacks, str):
         adv_attacks = [adv_attacks]
 
     cls = load_cls(cls_type, cls_weights_path, in_ds_name)
@@ -127,7 +132,7 @@ def activation_detector(cls_type,
     _, in_test_ds = load_datasets(in_ds_name)
     _, out_test_ds = load_datasets(out_ds_name)
     in_test_loader = torch.utils.data.DataLoader(in_test_ds,
-                                                 batch_size=batch_size,
+                                                 batch_size=BATCH_SIZE,
                                                  shuffle=False)
 
     for adv_attack in adv_attacks:
@@ -135,23 +140,10 @@ def activation_detector(cls_type,
         clean_loader = np_loader(clean_data, False)
         adv_loader = np_loader(adv_data, True)
 
-        clean_features = []
-        for batch, _ in tqdm(clean_loader, desc=f'Clean test set'):
-            _, features = cls.post_relu_features(batch.cuda())
-            features = [f.flatten(1) for f in features]
-            features = [f.cpu().detach().numpy() for f in features]
-            features = np.concatenate(features, axis=1)
-            clean_features.append(features)
-        clean_features = np.concatenate(clean_features)
-
-        adv_features = []
-        for batch, _ in tqdm(adv_loader, desc=f'{adv_attack} test set'):
-            _, features = cls.post_relu_features(batch.cuda())
-            features = [f.flatten(1) for f in features]
-            features = [f.cpu().detach().numpy() for f in features]
-            features = np.concatenate(features, axis=1)
-            adv_features.append(features)
-        adv_features = np.concatenate(adv_features)
+        clean_features = calculate_features(clean_loader, cls,
+                                            "Calculating features of clean test set")
+        adv_features = calculate_features(adv_loader, cls,
+                                          "Calculating features of adv test set")
 
         clean_train_features = np.where(clean_features > 0., 1., 0.)
         adv_train_features = np.where(adv_features > 0., 1., 0.)
@@ -182,8 +174,7 @@ def activation_detector(cls_type,
                 [np.zeros(clean_bits_flipped.shape[0]),
                  np.ones(adv_bits_flipped.shape[0])])
 
-            fpr, tpr, thresholds = roc_curve(labels, scores)
-            auc_score = auc(fpr, tpr)
+            fpr, tpr, _thresholds = roc_curve(labels, scores)
             mesh_fpr.append(fpr)
             mesh_tpr.append(tpr)
             mesh_variance.append(np.ones(fpr.shape[0]) * v)
@@ -196,6 +187,11 @@ def activation_detector(cls_type,
 
 
 def viz_adv_detection(adv_attack, sub_sample=10000):
+    """
+    Args:
+        adv_attack: ???
+        sub_sample: ???
+    """
     ds = np.load(f'activ_{adv_attack}_mesh.npz')
     tpr = ds['arr_0'].item()['tpr']
     fpr = ds['arr_0'].item()['fpr']
@@ -216,6 +212,11 @@ def viz_adv_detection(adv_attack, sub_sample=10000):
 
 
 def viz(adv_attack, variances_to_plot=None):
+    """
+    Args: TODO
+        adv_attack: ???
+        variances_to_plot: ???
+    """
     ds = np.load(f'activ_{adv_attack}_mesh.npz', allow_pickle=True)
 
     tpr = ds['arr_0'].item()['tpr']
