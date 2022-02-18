@@ -9,19 +9,18 @@ Original code is from https://github.com/kuangliu/pytorch-cifar/blob/master/mode
 '''
 import os
 import math
+from pathlib import Path
+
 import fire
 import torch
 import torch.nn as nn
 from tqdm import tqdm
 import torch.nn.functional as F
-
 from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 import torch.optim as optim
-from tensorboardX import SummaryWriter
 
-from validity.datasets import load_datasets
-from validity.util import EarlyStopping
+from validity.classifiers.train import standard_train
 
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -261,8 +260,8 @@ def ResNet34(num_c, in_ch, in_transform=None):
                   in_channels=in_ch)
 
 
-def ResNet50():
-    return ResNet(Bottleneck, [3, 4, 6, 3])
+def ResNet50(num_c, in_ch):
+    return ResNet(Bottleneck, [3, 4, 6, 3], num_classes=num_c, in_channels=in_ch)
 
 
 def ResNet101():
@@ -320,7 +319,8 @@ def train_network(dataset,
                   max_epochs=1000,
                   data_root='./datasets/',
                   cuda_idx=0,
-                  batch_size=64):
+                  batch_size=64,
+                  id=None):
     if dataset == 'mnist':
         num_labels = 10
         in_channels = 1
@@ -330,68 +330,20 @@ def train_network(dataset,
 
     if net_type == 'resnet18':
         net = ResNet18(num_labels, in_channels)
-    elif net_type == 'resnet34' or 'resnet':
+    elif net_type == 'resnet34':
         net = ResNet34(num_labels, in_channels)
+    elif net_type == 'resnet50':
+        net = ResNet50(num_labels, in_channels)
     net = net.cuda()
     net.train()
 
-    train_set, test_set = load_datasets(dataset)
-    train_set, val_set = torch.utils.data.random_split(train_set, [50000, 10000])
+    name = f'cls_{net_type}_{dataset}'
+    if id:
+        name = f'{name}_{id}'
+    net_path = Path(f'models/{name}.pt')
+    tb_path = f'tensorboard/resnet/{name}'
 
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
-    val_loader = torch.utils.data.DataLoader(val_set, batch_size=batch_size, shuffle=True)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, shuffle=True)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(net.parameters(), weight_decay=1e-4)
-
-    early_stopping = EarlyStopping(net.state_dict(), f'models/cls_{net_type}_{dataset}.pt')
-    writer = SummaryWriter(f'models/cls_{net_type}_{dataset}_res')
-
-    step = 0
-    for epoch in range(max_epochs):
-        print(f'Epoch {epoch}')
-        for data, labels in tqdm(train_loader):
-            optimizer.zero_grad()
-            outputs = net(data.cuda())
-            loss = criterion(outputs, labels.cuda())
-            loss.backward()
-            optimizer.step()
-            writer.add_scalar('train/loss', loss, step)
-            step += 1
-
-        losses = []
-        with torch.no_grad():
-            correct = 0.
-            total = 0.
-            for data, labels in tqdm(val_loader):
-                outputs = net(data.cuda())
-                loss = criterion(outputs, labels.cuda())
-                losses.append(loss)
-                writer.add_scalar('valid/loss', loss, step)
-                step += 1
-
-                _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += (predicted == labels.cuda()).sum().item()
-            writer.add_scalar('valid/accuracy', correct / total, step)
-
-        loss = torch.mean(torch.tensor(loss))
-        if early_stopping(loss):
-            break
-
-    losses = []
-    correct = 0.
-    total = 0.
-    with torch.no_grad():
-        for data, labels in test_loader:
-            outputs = net(data.cuda())
-            loss = criterion(outputs, labels.cuda())
-            losses.append(loss)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels.cuda()).sum().item()
-
-    print(f'Accuracy {correct / total}')
+    standard_train(net, net_path, dataset, batch_size, tb_path=tb_path)
 
 
 if __name__ == '__main__':

@@ -20,7 +20,7 @@ from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, rec
 from scipy.spatial.distance import cdist
 
 from validity.datasets import load_datasets
-from validity.classifiers import load_cls
+from validity.classifiers.load import load_cls
 
 
 class LIDDetector:

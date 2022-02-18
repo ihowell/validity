@@ -12,7 +12,7 @@ from cleverhans.torch.attacks.fast_gradient_method import fast_gradient_method
 from torchvision import transforms, datasets
 from tqdm import tqdm
 
-from validity.classifiers import load_cls
+from validity.classifiers.load import load_cls
 from validity.datasets import load_datasets
 
 

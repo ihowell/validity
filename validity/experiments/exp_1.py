@@ -1,9 +1,12 @@
 from pathlib import Path
 
+import fire
+
 from validity.adv_dataset import construct_dataset as construct_adv_dataset, \
     adv_dataset_exists
-from validity.classifiers import load_cls
+from validity.classifiers.load import load_cls, get_cls_path, construct_cls
 from validity.classifiers.mnist import train_network as train_mnist_cls
+from validity.classifiers.train import standard_train
 from validity.contrastive.dataset import get_contrastive_dataset_path
 from validity.detectors.density import train_density_adv, get_density_path, DensityDetector
 from validity.detectors.lid import train_multiple_lid_adv, get_best_lid_path, LIDDetector
@@ -28,43 +31,56 @@ def c_func(path, func, *params, **kwargs):
         func(*params, **kwargs)
 
 
-def c_adv_dataset(dataset, adv_attack, net_type, cls_path):
-    if adv_dataset_exists('mnist', adv_attack, dataset):
-        print(f'Found cached adv dataset {dataset} {adv_attack} {net_type}')
+def c_adv_dataset(dataset, adv_attack, cls_type, cls_path):
+    if adv_dataset_exists(cls_type, adv_attack, dataset):
+        print(f'Found cached adv dataset {dataset} {adv_attack} {cls_type}')
     else:
-        print(f'Constructing adv dataset {dataset} {adv_attack} {net_type}')
-        construct_adv_dataset(dataset, adv_attack, net_type, cls_path)
+        print(f'Constructing adv dataset {dataset} {adv_attack} {cls_type}')
+        construct_adv_dataset(dataset, adv_attack, cls_type, cls_path)
 
 
-def run_experiment():
-    mnist_cls_path = Path('models/cls_mnist_mnist.pt')
+def train_func(cls_type, dataset, batch_size):
+    cls = construct_cls(cls_type, dataset)
+    cls_path = get_cls_path(cls_type, dataset)
+    cls = cls.cuda()
+    cls.train()
+    standard_train(cls, cls_path, dataset, batch_size)
+
+
+def run_experiment(cls_type, in_dataset, out_dataset):
     adv_attacks = ['fgsm', 'bim', 'cwl2']
     vae_path = get_mnist_vae_path(beta=20.)
     bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3)
 
-    # Train classifiers
-    c_func(mnist_cls_path, train_mnist_cls)
+    cls_path = get_cls_path(cls_type, in_dataset)
+    # vae_path = get_mnist_vae_path(beta=10.)
+    mnist_encode_vae_path = Path('data/mnist_vae_encode_mnist_test.npz')
+    mnist_encode_wgan_gp_path = Path('data/wgan_gp_encode_mnist_test.npz')
+    wgan_gp_path = Path('models/wgan_gp_mnist_lam_10_iter_5.pt')
+    eval_vae_path = get_mnist_vae_path(beta=20., id='eval')
+    eval_bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3, id='eval')
+
+    # Train classifier
+    c_func(cls_path, train_func, cls_type, in_dataset, 64)
 
     # Train generative functions
-    c_func(vae_path, train_mnist_vae, beta=20.)
-    c_func(bg_vae_path, train_mnist_vae, beta=20., mutation_rate=0.3)
-    c_func('models/wgan_gp_mnist_lam_10_iter_5.pt',
-           train_wgan_gp,
-           'mnist',
-           lambda_term=10.,
-           critic_iter=5)
+    c_func(eval_vae_path, train_mnist_vae, beta=20., id='eval')
+    c_func(eval_bg_vae_path, train_mnist_vae, beta=20., mutation_rate=0.3, id='eval')
+    c_func(wgan_gp_path, train_wgan_gp, in_dataset, lambda_term=10., critic_iter=5)
 
     # Create adversarial datasets
     for adv_attack in adv_attacks:
-        c_adv_dataset('mnist', adv_attack, 'mnist', mnist_cls_path)
+        c_adv_dataset(in_dataset, adv_attack, cls_type, cls_path)
 
     # Train OOD detectors
-    c_func(get_best_odin_path('mnist', 'mnist', 'fmnist'), train_multiple_odin, 'mnist',
-           'fmnist', 'mnist', mnist_cls_path)
-    c_func(get_llr_path('mnist', 'fmnist', 0.3), train_llr_ood, 'mnist', 'fmnist', 'mnist_vae',
-           vae_path, bg_vae_path, 0.3)
-    c_func(get_best_mahalanobis_ood_path('mnist', 'mnist', 'fmnist'),
-           train_multiple_mahalanobis_ood, 'mnist', 'fmnist', 'mnist', mnist_cls_path)
+    odin_path = get_best_odin_path(cls_type, in_dataset, out_dataset)
+    llr_path = get_llr_path(in_dataset, out_dataset, 0.3)
+    mahalanobis_ood_path = get_best_mahalanobis_ood_path(cls_type, in_dataset, out_dataset)
+    c_func(odin_path, train_multiple_odin, in_dataset, out_dataset, cls_type, cls_path)
+    c_func(llr_path, train_llr_ood, in_dataset, out_dataset, 'mnist_vae', eval_vae_path,
+           eval_bg_vae_path, 0.3)
+    c_func(mahalanobis_ood_path, train_multiple_mahalanobis_ood, in_dataset, out_dataset,
+           cls_type, cls_path)
 
     # Train ADV detectors
     for adv_attack in adv_attacks:
@@ -80,4 +96,4 @@ def run_experiment():
 
 
 if __name__ == '__main__':
-    run_experiment()
+    fire.Fire(run_experiment)

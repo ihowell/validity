@@ -22,7 +22,7 @@ from torchvision import datasets, transforms
 from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
 
-from validity.classifiers import load_cls
+from validity.classifiers.load import load_cls
 from validity.datasets import load_datasets
 from validity.generators.load import load_gen, load_encoded_ds
 

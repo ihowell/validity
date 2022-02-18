@@ -3,13 +3,11 @@ import numpy as np
 from tqdm import tqdm
 from torchvision import datasets, transforms
 
-from validity.classifiers.resnet import ResNet34
+from validity.generators.nvae.model import load_nvae
 
 if __name__ == '__main__':
-    model = ResNet34(
-        10,
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010)))
+    model = ResNet34(10,
+                     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
     model.load_state_dict(
         torch.load('/mnt/d/research/classifiers/cifar10/resnet_cifar10.pth',
                    map_location='cuda:0'))
@@ -31,7 +29,6 @@ if __name__ == '__main__':
         logits = model(data)
         preds = torch.argmax(logits, 1)
         accuracies.append(
-            torch.mean(torch.where(preds == label, 1.,
-                                   0.)).cpu().detach().numpy())
+            torch.mean(torch.where(preds == label, 1., 0.)).cpu().detach().numpy())
 
     print('Accuracy', np.mean(accuracies))

@@ -243,8 +243,14 @@ def viz(adv_attack, variances_to_plot=None):
             best_auc = auc_score
             best_idx = i
 
+    best_acc = 0.
+    for f, t, in zip(fpr[best_idx], tpr[best_idx]):
+        acc = (t + 1. - f) / 2
+        best_acc = max(best_acc, acc)
+
     print(f'Best variance: {variance[best_idx][0]:.3f}')
     print(f'Best AUC: {best_auc:.3f}')
+    print(f'Best Accuracy: {best_acc:.3f}')
 
     ax.plot(fpr[best_idx], tpr[best_idx], label=variance[best_idx][0])
 

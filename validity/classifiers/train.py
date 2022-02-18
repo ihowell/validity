@@ -2,28 +2,38 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from tensorboardX import SummaryWriter
 
 from tqdm import tqdm
 
+from validity.datasets import load_datasets
 from validity.util import EarlyStopping
 
 
 def standard_train(net,
                    save_path,
-                   train_set,
-                   val_set,
-                   test_set,
+                   dataset,
                    batch_size,
+                   tb_path=None,
+                   val_prop=0.1,
                    max_epochs=1000,
                    lr=1e-3):
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=True)
+    train_ds, test_ds = load_datasets(dataset)
+    train_size = int(len(train_ds) * (1 - val_prop))
+    train_ds, val_ds = torch.utils.data.random_split(
+        train_ds, [train_size, len(train_ds) - train_size])
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=True)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(net.parameters(), lr=lr)
 
     early_stopping = EarlyStopping(net.state_dict(), save_path)
+    if tb_path:
+        writer = SummaryWriter(tb_path)
 
+    step = 0
     for epoch in range(max_epochs):
         print(f'Epoch {epoch}')
         for data, labels in tqdm(train_loader):
@@ -32,6 +42,9 @@ def standard_train(net,
             loss = criterion(outputs, labels.cuda())
             loss.backward()
             optimizer.step()
+            if tb_path:
+                writer.add_scalar('train/loss', loss.mean(), step)
+            step += 1
 
         losses = []
         with torch.no_grad():
@@ -41,6 +54,8 @@ def standard_train(net,
                 losses.append(loss)
 
         loss = torch.mean(torch.tensor(loss))
+        if tb_path:
+            writer.add_scalar('val/loss', loss.mean(), step)
         if early_stopping(loss):
             break
 

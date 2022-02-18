@@ -6,7 +6,7 @@ import numpy as np
 
 from tqdm import tqdm
 
-from validity.classifiers import load_cls
+from validity.classifiers.load import load_cls
 from validity.datasets import load_datasets
 from validity.generators.load import load_gen, load_encoded_ds, get_encoded_ds_path
 from validity.util import get_executor
