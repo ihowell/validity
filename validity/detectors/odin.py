@@ -21,8 +21,9 @@ from validity.classifiers.load import load_cls
 from validity.datasets import load_datasets
 
 
-class ODINDetector:
+class ODINDetector(nn.Module):
     def __init__(self, network=None, noise_magnitude=None, temper=None):
+        super().__init__()
         self.network = network
         self.criterion = nn.CrossEntropyLoss()
         self.noise_magnitude = noise_magnitude
@@ -127,8 +128,11 @@ def train_odin(in_dataset,
     torch.cuda.set_device(cuda_idx)
 
     network = load_cls(net_type, weights_path, in_dataset)
+    network = network.cuda()
+    network.eval()
 
     odin = ODINDetector(network, magnitude, temperature)
+    odin = odin.cuda()
 
     _, in_test_ds = load_datasets(in_dataset)
     in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)

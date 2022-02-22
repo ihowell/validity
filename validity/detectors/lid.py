@@ -194,6 +194,8 @@ def train_lid_adv(dataset,
     torch.cuda.set_device(cuda_idx)
 
     network = load_cls(net_type, weights_path, dataset)
+    network = network.cuda()
+    network.eval()
 
     clean_data, adv_data, noisy_data = load_adv_dataset(dataset, adv_attack, net_type)
 

@@ -5,7 +5,6 @@ import fire
 from validity.adv_dataset import construct_dataset as construct_adv_dataset, \
     adv_dataset_exists
 from validity.classifiers.load import load_cls, get_cls_path, construct_cls
-from validity.classifiers.mnist import train_network as train_mnist_cls
 from validity.classifiers.train import standard_train
 from validity.contrastive.dataset import get_contrastive_dataset_path
 from validity.detectors.density import train_density_adv, get_density_path, DensityDetector
@@ -32,7 +31,7 @@ def c_func(path, func, *params, **kwargs):
 
 
 def c_adv_dataset(dataset, adv_attack, cls_type, cls_path):
-    if adv_dataset_exists(cls_type, adv_attack, dataset):
+    if adv_dataset_exists(dataset, adv_attack, cls_type):
         print(f'Found cached adv dataset {dataset} {adv_attack} {cls_type}')
     else:
         print(f'Constructing adv dataset {dataset} {adv_attack} {cls_type}')
@@ -49,11 +48,8 @@ def train_func(cls_type, dataset, batch_size):
 
 def run_experiment(cls_type, in_dataset, out_dataset):
     adv_attacks = ['fgsm', 'bim', 'cwl2']
-    vae_path = get_mnist_vae_path(beta=20.)
-    bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3)
 
     cls_path = get_cls_path(cls_type, in_dataset)
-    # vae_path = get_mnist_vae_path(beta=10.)
     mnist_encode_vae_path = Path('data/mnist_vae_encode_mnist_test.npz')
     mnist_encode_wgan_gp_path = Path('data/wgan_gp_encode_mnist_test.npz')
     wgan_gp_path = Path('models/wgan_gp_mnist_lam_10_iter_5.pt')
@@ -64,9 +60,9 @@ def run_experiment(cls_type, in_dataset, out_dataset):
     c_func(cls_path, train_func, cls_type, in_dataset, 64)
 
     # Train generative functions
+    c_func(wgan_gp_path, train_wgan_gp, in_dataset, lambda_term=10., critic_iter=5)
     c_func(eval_vae_path, train_mnist_vae, beta=20., id='eval')
     c_func(eval_bg_vae_path, train_mnist_vae, beta=20., mutation_rate=0.3, id='eval')
-    c_func(wgan_gp_path, train_wgan_gp, in_dataset, lambda_term=10., critic_iter=5)
 
     # Create adversarial datasets
     for adv_attack in adv_attacks:
@@ -84,15 +80,16 @@ def run_experiment(cls_type, in_dataset, out_dataset):
 
     # Train ADV detectors
     for adv_attack in adv_attacks:
-        c_func(get_density_path('mnist', 'mnist', adv_attack), train_density_adv, 'mnist',
-               'mnist', mnist_cls_path, adv_attack)
-        c_func(get_best_lid_path('mnist', 'mnist', adv_attack), train_multiple_lid_adv,
-               'mnist', 'mnist', mnist_cls_path, adv_attack)
-        c_func(get_best_mahalanobis_adv_path('mnist', 'mnist', adv_attack),
-               train_multiple_mahalanobis_adv, 'mnist', 'mnist', mnist_cls_path, adv_attack)
+        density_path = get_density_path(cls_type, in_dataset, adv_attack)
+        lid_path = get_best_lid_path(cls_type, in_dataset, adv_attack)
+        mahalanobis_adv_path = get_best_mahalanobis_adv_path(cls_type, in_dataset, adv_attack)
+        c_func(density_path, train_density_adv, in_dataset, cls_type, cls_path, adv_attack)
+        c_func(lid_path, train_multiple_lid_adv, in_dataset, cls_type, cls_path, adv_attack)
+        c_func(mahalanobis_adv_path, train_multiple_mahalanobis_adv, in_dataset, cls_type,
+               cls_path, adv_attack)
 
     # Evaluate detector joint distribution and error
-    joint_ood_adv('mnist', 'mnist', 'fmnist', adv_attacks)
+    joint_ood_adv(cls_type, in_dataset, out_dataset, adv_attacks)
 
 
 if __name__ == '__main__':

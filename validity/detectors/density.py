@@ -17,6 +17,7 @@ from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, rec
 from sklearn.neighbors import KernelDensity
 
 from validity.adv_dataset import load_adv_dataset
+from validity.classifiers.load import load_cls
 from validity.datasets import load_datasets
 
 BANDWIDTHS = {'mnist': 1.20, 'cifar10': 0.26, 'svhn': 1.00}
@@ -117,7 +118,7 @@ class DensityDetector:
 
 def train_density_adv(dataset,
                       net_type,
-                      weights_location,
+                      weights_path,
                       adv_attack,
                       cuda_idx=0,
                       data_root='./datasets/'):
@@ -128,14 +129,9 @@ def train_density_adv(dataset,
     np.random.seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    if net_type == 'mnist':
-        network = MnistClassifier()
-        network.load_state_dict(torch.load(weights_location, map_location=f'cuda:0'))
-    elif net_type == 'resnet':
-        network = ResNet34(
-            10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
-        network.load_state_dict(torch.load(weights_location, map_location=f'cuda:0'))
+    network = load_cls(net_type, weights_path, dataset)
     network = network.cuda()
+    network.eval()
 
     if dataset == 'mnist':
         num_labels = 10

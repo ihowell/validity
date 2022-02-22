@@ -173,11 +173,7 @@ def train(dataset,
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
     train_loader = loop_gen(train_loader)
 
-    save_name = f'mnist'
-    if id:
-        save_name += '_' + id
-    writer = SummaryWriter('tensorboard/wgan_gp/' + save_name)
-    save_path = f'models/wgan_gp_{save_name}.pt'
+    save_path = get_save_path(lambda_term, critic_iter, id=id)
 
     optim_disc, optim_gen = gan.get_train_optimizers()
 
@@ -196,6 +192,16 @@ def train(dataset,
 
         torch.save(gan.state_dict(), save_path)
         step += 1
+
+
+def get_save_path(dataset, lambda_term, critic_iter, id=None):
+    lambda_term = float(lambda_term)
+    critic_iter = int(critic_iter)
+    save_name = f'wgan_gp_{dataset}_lam_{lambda_term}_iter_{critic_iter}'
+    if id:
+        save_name += f'_{id}'
+    save_path = f'models/{save_name}.pt'
+    return save_path
 
 
 def submit_train_multiple(dataset, lambda_terms, critic_iters, **kwargs):

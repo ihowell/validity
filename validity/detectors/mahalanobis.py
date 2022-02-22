@@ -283,6 +283,8 @@ def train_mahalanobis_ood(in_dataset,
     torch.cuda.set_device(cuda_idx)
 
     network = load_cls(net_type, weights_path, in_dataset)
+    network = network.cuda()
+    network.eval()
 
     if in_dataset == 'mnist':
         num_labels = 10
@@ -341,14 +343,9 @@ def train_mahalanobis_adv(dataset,
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    if net_type == 'mnist':
-        network = MnistClassifier()
-        network.load_state_dict(torch.load(weights_path, map_location=f'cuda:0'))
-    elif net_type == 'resnet':
-        network = ResNet34(
-            10, transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)))
-        network.load_state_dict(torch.load(weights_path, map_location=f'cuda:0'))
+    network = load_cls(net_type, weights_path, dataset)
     network = network.cuda()
+    network.eval()
 
     if dataset == 'mnist':
         num_labels = 10

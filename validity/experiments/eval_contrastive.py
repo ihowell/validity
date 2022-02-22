@@ -11,7 +11,7 @@ from torchvision import datasets, transforms
 from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
 
 from validity.adv_dataset import load_adv_dataset
-from validity.classifiers import load_cls
+from validity.classifiers.load import load_cls
 from validity.datasets import load_datasets
 from validity.detectors.load import load_detectors
 from validity.detectors.lid import LIDDetector
