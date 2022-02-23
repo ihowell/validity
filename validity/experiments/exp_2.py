@@ -34,7 +34,7 @@ def c_func(path, func, *params, **kwargs):
 
 
 def c_adv_dataset(dataset, adv_attack, net_type, cls_path):
-    if adv_dataset_exists('mnist', adv_attack, dataset):
+    if adv_dataset_exists(dataset, adv_attack, dataset):
         print(f'Found cached adv dataset {dataset} {adv_attack} {net_type}')
     else:
         print(f'Constructing adv dataset {dataset} {adv_attack} {net_type}')
@@ -55,7 +55,6 @@ def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False):
 
     cls_path = get_cls_path(cls_type, in_dataset)
     vae_path = get_mnist_vae_path(beta=10.)
-    mnist_encode_vae_path = Path('data/mnist_vae_encode_mnist_test.npz')
     mnist_encode_wgan_gp_path = Path('data/wgan_gp_encode_mnist_test.npz')
     wgan_gp_path = get_wgan_gp_path(in_dataset, 10, 5)
     eval_vae_path = get_mnist_vae_path(beta=20., id='eval')

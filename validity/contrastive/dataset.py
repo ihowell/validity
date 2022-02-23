@@ -107,10 +107,12 @@ def _make_contrastive_dataset_job(contrastive_type,
 
     print('Loading classifier')
     classifier = load_cls(classifier_net_type, classifier_weights_path, dataset)
+    classifier = classifier.cuda()
     classifier.eval()
 
     print('Loading generator')
     generator = load_gen(generator_net_type, generator_weights_path, dataset)
+    generator = generator.cuda()
     generator.eval()
 
     examples = []
