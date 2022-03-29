@@ -40,6 +40,7 @@ class MahalanobisDetector:
 
     def predict(self, inputs):
         assert self.lr is not None and self.sc is not None
+        inputs = inputs.type(torch.float)
         Mahalanobis = []
         for layer_idx in range(self.num_outputs):
             Mahalanobis.append(self.score(inputs, layer_idx))
@@ -49,6 +50,7 @@ class MahalanobisDetector:
 
     def predict_proba(self, inputs):
         assert self.lr is not None
+        inputs = inputs.type(torch.float)
         Mahalanobis = []
         for layer_idx in range(self.num_outputs):
             Mahalanobis.append(self.score(inputs, layer_idx))

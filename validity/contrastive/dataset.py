@@ -45,13 +45,14 @@ def make_contrastive_dataset(contrastive_type,
     examples = []
     example_labels = []
     for i in range(shards):
-        _file = np.load(
-            f'data/tmp/{contrastive_type}_{generator_net_type}_{dataset}_{i}_{shards}.npz')
+        shard_path = _get_contrastive_dataset_shard_path(contrastive_type, dataset,
+                                                         classifier_net_type,
+                                                         generator_net_type, i, shards)
+        _file = np.load(shard_path)
         examples.append(_file['arr_0'])
         example_labels.append(_file['arr_1'])
     examples = np.concatenate(examples)
     example_labels = np.concatenate(example_labels)
-
     Path('data').mkdir(exist_ok=True)
     save_path = get_contrastive_dataset_path(contrastive_type, dataset, classifier_net_type,
                                              generator_net_type)
@@ -208,9 +209,17 @@ def _make_contrastive_dataset_job(contrastive_type,
     example_labels = np.concatenate(example_labels)
 
     Path('data/tmp').mkdir(exist_ok=True, parents=True)
+    shard_path = _get_contrastive_dataset_shard_path(contrastive_type, dataset,
+                                                     classifier_net_type, generator_net_type,
+                                                     shard_idx, shards)
     np.savez(
-        f'data/tmp/{contrastive_type}_{generator_net_type}_{dataset}_{shard_idx}_{shards}.npz',
+        f'data/tmp/{contrastive_type}_{dataset}_{classifier_net_type}_{generator_net_type}_{shard_idx}_{shards}.npz',
         examples, example_labels)
+
+
+def _get_contrastive_dataset_shard_path(contrastive_type, dataset, classifier_net_type,
+                                        generator_net_type, shard_idx, shards):
+    return f'data/tmp/{contrastive_type}_{dataset}_{classifier_net_type}_{generator_net_type}_{shard_idx}_{shards}.npz'
 
 
 def get_contrastive_dataset_path(contrastive_type, dataset, classifier_net_type,

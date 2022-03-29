@@ -115,7 +115,7 @@ def joint_ood_adv(net_type,
         row = [detector_name] + row
         results.append(row)
 
-    print(tabulate(results))
+    print(tabulate(results, tablefmt='tsv'))
     print('')
     headers = ['OOD Method', 'Adv Method', in_ds_name, out_ds_name
                ] + adv_attacks + ['Combined']
@@ -150,7 +150,7 @@ def joint_ood_adv(net_type,
             row = [ood_method, adv_method] + [f'{x:.4f}' for x in accuracies]
             results.append(row)
 
-    print(tabulate(results, headers=headers, tablefmt='latex'))
+    print(tabulate(results, headers=headers, tablefmt='tsv'))
 
 
 if __name__ == '__main__':

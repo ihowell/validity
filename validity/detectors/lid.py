@@ -45,12 +45,14 @@ class LIDDetector:
 
     def predict(self, x):
         assert self.lr is not None
+        x = x.type(torch.float)
         estimate, _ = self.sample_estimate()
         scores = self.score(estimate.cuda(), x)
         return -self.lr.predict(scores) + 1.
 
     def predict_proba(self, x):
         assert self.lr is not None
+        x = x.type(torch.float)
         estimate, _ = self.sample_estimate()
         scores = self.score(estimate.cuda(), x)
         return -self.lr.predict_proba(scores) + 1.

@@ -173,7 +173,7 @@ def train(dataset,
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
     train_loader = loop_gen(train_loader)
 
-    save_path = get_save_path(lambda_term, critic_iter, id=id)
+    save_path = get_save_path(dataset, lambda_term, critic_iter, id=id)
 
     optim_disc, optim_gen = gan.get_train_optimizers()
 

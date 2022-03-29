@@ -20,14 +20,13 @@ from validity.util import EarlyStopping
 class MnistClassifier(nn.Module):
     def __init__(self):
         super().__init__()
-        self.transform = transforms.Resize((64, 64))
         self.conv1 = nn.Conv2d(1, 32, 5)
         self.conv2 = nn.Conv2d(32, 20, 5)
         self.dense = nn.Linear(3380, 10)
 
     def forward(self, x):
         out = x
-        out = self.transform(out)
+        out = F.interpolate(x, size=(64,64))
         out = self.conv1(out)
         out = F.max_pool2d(out, 2)
         out = torch.relu(out)
@@ -40,7 +39,7 @@ class MnistClassifier(nn.Module):
 
     def penultimate_forward(self, x):
         out = x
-        out = self.transform(out)
+        out = F.interpolate(x, size=(64,64))    
         out = self.conv1(out)
         out = F.max_pool2d(out, 2)
         out = torch.relu(out)
@@ -55,7 +54,7 @@ class MnistClassifier(nn.Module):
     def feature_list(self, x):
         features = []
         out = x
-        out = self.transform(out)
+        out = F.interpolate(x, size=(64,64))
         out = self.conv1(out)
         features.append(out)
         out = F.max_pool2d(out, 2)
@@ -71,7 +70,7 @@ class MnistClassifier(nn.Module):
     def post_relu_features(self, x):
         features = []
         out = x
-        out = self.transform(out)
+        out = F.interpolate(x, size=(64,64))
         out = self.conv1(out)
         out = F.max_pool2d(out, 2)
         out = torch.relu(out)
@@ -88,7 +87,7 @@ class MnistClassifier(nn.Module):
 
     def intermediate_forward(self, x, layer_idx):
         out = x
-        out = self.transform(out)
+        out = F.interpolate(x, size=(64,64))
         out = self.conv1(out)
         if layer_idx == 0:
             return out
@@ -103,11 +102,6 @@ class MnistClassifier(nn.Module):
         out = self.dense(out)
         return out
 
-
-def test():
-    net = ResNet18()
-    y = net(Variable(torch.randn(1, 3, 32, 32)))
-    print(y.size())
 
 
 def train_network(max_epochs=1000, data_root='./datasets/', train_method=None, **kwargs):

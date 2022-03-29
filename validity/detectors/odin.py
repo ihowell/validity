@@ -34,13 +34,15 @@ class ODINDetector(nn.Module):
 
     def predict(self, inputs):
         assert self.lr is not None
-        score = self.score(inputs)
+        with torch.cuda.amp.autocast():
+            score = self.score(inputs)
         score = self.sc.transform(score)
         return -self.lr.predict(score) + 1.
 
     def predict_proba(self, inputs):
         assert self.lr is not None
-        score = self.score(inputs)
+        with torch.cuda.amp.autocast():
+            score = self.score(inputs)
         score = self.sc.transform(score)
         return -self.lr.predict_proba(score) + 1.
 

@@ -27,6 +27,7 @@ class LikelihoodRatioDetector:
         self.lr = None
 
     def predict(self, x):
+        x = x.type(torch.float)
         x = x.cuda()
         llr = self.ll_est.log_prob(x) - self.bg_ll_est.log_prob(x)
         llr = llr.cpu().detach().numpy()
@@ -34,6 +35,7 @@ class LikelihoodRatioDetector:
         return self.lr.predict(llr)
 
     def predict_proba(self, x):
+        x = x.type(torch.float)
         x = x.cuda()
         llr = self.ll_est.log_prob(x) - self.bg_ll_est.log_prob(x)
         llr = llr.cpu().detach().numpy()

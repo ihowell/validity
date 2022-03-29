@@ -27,6 +27,7 @@ def eval_contrastive_ds(contrastive_method,
                         cls_weights_path,
                         in_ds_name,
                         out_ds_name,
+                        gen_name,
                         adv_attack,
                         data_root='./datasets/',
                         adv_step=True,
@@ -46,10 +47,12 @@ def eval_contrastive_ds(contrastive_method,
                                                   adv_step=adv_step)
 
     cls = load_cls(cls_type, cls_weights_path, in_ds_name)
+    cls.cuda()
     if verbose:
         print(f'Evaluating on classifier:')
     cls_preds = []
     for data, labels in tqdm(loader, disable=not verbose):
+        data = data.type(torch.float)
         cls_preds.append(
             torch.where(cls(data.cuda()).argmax(-1) == labels.cuda(), 1.,
                         0.).cpu().detach().numpy())
@@ -62,7 +65,7 @@ def eval_contrastive_ds(contrastive_method,
     for detector_name, detector in ood_detectors:
         preds = []
         for batch, _ in tqdm(loader, disable=not verbose):
-            preds.append(detector.predict(batch))
+            preds.append(detector.predict(batch.float()))
         preds = np.concatenate(preds)
         ood_preds[detector_name] = preds
 
@@ -72,7 +75,7 @@ def eval_contrastive_ds(contrastive_method,
     for detector_name, detector in adv_detectors:
         preds = []
         for batch, _ in tqdm(loader, disable=not verbose):
-            preds.append(detector.predict(batch))
+            preds.append(detector.predict(batch.type(torch.float)))
         preds = np.concatenate(preds)
         adv_preds[detector_name] = preds
 
@@ -108,7 +111,7 @@ def eval_contrastive_ds(contrastive_method,
     print(tabulate(result_table))
 
     with open(
-            get_eval_res_path(contrastive_method, cls_type, in_ds_name, out_ds_name,
+            get_eval_res_path(contrastive_method, cls_type, in_ds_name, out_ds_name, gen_name,
                               adv_attack), 'w') as out_file:
         json.dump(
             {
@@ -119,9 +122,10 @@ def eval_contrastive_ds(contrastive_method,
             }, out_file)
 
 
-def get_eval_res_path(contrastive_method, cls_type, in_ds_name, out_ds_name, adv_attack):
+def get_eval_res_path(contrastive_method, cls_type, in_ds_name, out_ds_name, gen_name,
+                      adv_attack):
     return Path(
-        f'data/eval_{contrastive_method}_{cls_type}_{in_ds_name}_{out_ds_name}_{adv_attack}.json'
+        f'data/eval_{contrastive_method}_{cls_type}_{in_ds_name}_{out_ds_name}_{gen_name}_{adv_attack}.json'
     )
 
 

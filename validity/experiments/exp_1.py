@@ -17,7 +17,7 @@ from validity.detectors.mahalanobis import MahalanobisDetector, \
     train_multiple_mahalanobis_adv, train_multiple_mahalanobis_ood
 from validity.generators.mnist_vae import train as train_mnist_vae, \
     get_save_path as get_mnist_vae_path
-from validity.generators.wgan_gp import train as train_wgan_gp
+from validity.generators.wgan_gp import train as train_wgan_gp, get_save_path as get_wgan_gp_path
 
 from .joint_ood_adv import joint_ood_adv
 
@@ -50,9 +50,9 @@ def run_experiment(cls_type, in_dataset, out_dataset):
     adv_attacks = ['fgsm', 'bim', 'cwl2']
 
     cls_path = get_cls_path(cls_type, in_dataset)
-    mnist_encode_vae_path = Path('data/mnist_vae_encode_mnist_test.npz')
-    mnist_encode_wgan_gp_path = Path('data/wgan_gp_encode_mnist_test.npz')
-    wgan_gp_path = Path('models/wgan_gp_mnist_lam_10_iter_5.pt')
+    mnist_encode_vae_path = Path(f'data/mnist_vae_encode_{in_dataset}_test.npz')
+    mnist_encode_wgan_gp_path = Path(f'data/wgan_gp_encode_{in_dataset}_test.npz')
+    wgan_gp_path = get_wgan_gp_path(in_dataset, 10, 5)
     eval_vae_path = get_mnist_vae_path(beta=20., id='eval')
     eval_bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3, id='eval')
 
