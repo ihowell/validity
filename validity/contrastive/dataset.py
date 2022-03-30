@@ -34,13 +34,19 @@ def make_contrastive_dataset(contrastive_type,
     executor = get_executor()
     jobs = []
     with executor.batch():
-        for i in range(shards):
-            jobs.append(
-                executor.submit(_make_contrastive_dataset_job, contrastive_type, dataset,
-                                classifier_net_type, classifier_weights_path,
-                                generator_net_type, generator_weights_path, i, shards,
-                                batch_size, data_root, cuda_idx, seed, dry_run_size, **kwargs))
-    [job.result() for job in jobs]
+        for shard_idx in range(shards):
+            shard_path = _get_contrastive_dataset_shard_path(contrastive_type, dataset,
+                                                             classifier_net_type,
+                                                             generator_net_type, shard_idx,
+                                                             shards)
+            if not shard_path.exists():
+                jobs.append(
+                    executor.submit(_make_contrastive_dataset_job, contrastive_type, dataset,
+                                    classifier_net_type, classifier_weights_path,
+                                    generator_net_type, generator_weights_path, shard_idx,
+                                    shards, batch_size, data_root, cuda_idx, seed,
+                                    dry_run_size, **kwargs))
+    [job.results() for job in jobs]
 
     examples = []
     example_labels = []
