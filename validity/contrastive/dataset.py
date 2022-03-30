@@ -39,7 +39,7 @@ def make_contrastive_dataset(contrastive_type,
                                                              classifier_net_type,
                                                              generator_net_type, shard_idx,
                                                              shards)
-            if not shard_path.exists():
+            if not Path(shard_path).exists():
                 jobs.append(
                     executor.submit(_make_contrastive_dataset_job, contrastive_type, dataset,
                                     classifier_net_type, classifier_weights_path,
