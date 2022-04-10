@@ -37,8 +37,8 @@ def make_contrastive_dataset(contrastive_type,
         for shard_idx in range(shards):
             shard_path = _get_contrastive_dataset_shard_path(contrastive_type, dataset,
                                                              classifier_net_type,
-                                                             generator_net_type, shard_idx,
-                                                             shards)
+                                                             generator_net_type, subset,
+                                                             shard_idx, shards)
             if not Path(shard_path).exists():
                 jobs.append(
                     executor.submit(_make_contrastive_dataset_job, contrastive_type, dataset,
@@ -53,7 +53,7 @@ def make_contrastive_dataset(contrastive_type,
     for i in range(shards):
         shard_path = _get_contrastive_dataset_shard_path(contrastive_type, dataset,
                                                          classifier_net_type,
-                                                         generator_net_type, i, shards)
+                                                         generator_net_type, subset, i, shards)
         _file = np.load(shard_path)
         examples.append(_file['arr_0'])
         example_labels.append(_file['arr_1'])
@@ -61,7 +61,7 @@ def make_contrastive_dataset(contrastive_type,
     example_labels = np.concatenate(example_labels)
     Path('data').mkdir(exist_ok=True)
     save_path = get_contrastive_dataset_path(contrastive_type, dataset, classifier_net_type,
-                                             generator_net_type)
+                                             generator_net_type, subset)
     np.savez(str(save_path), examples, example_labels)
 
 
