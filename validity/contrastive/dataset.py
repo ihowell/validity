@@ -27,7 +27,7 @@ def make_contrastive_dataset(contrastive_type,
                              data_root='./datasets/',
                              cuda_idx=0,
                              seed=0,
-                             dry_run_size=None,
+                             subset=None,
                              **kwargs):
     assert contrastive_type in ['am', 'xgems', 'cdeepex']
 
@@ -44,8 +44,8 @@ def make_contrastive_dataset(contrastive_type,
                     executor.submit(_make_contrastive_dataset_job, contrastive_type, dataset,
                                     classifier_net_type, classifier_weights_path,
                                     generator_net_type, generator_weights_path, shard_idx,
-                                    shards, batch_size, data_root, cuda_idx, seed,
-                                    dry_run_size, **kwargs))
+                                    shards, batch_size, data_root, cuda_idx, seed, subset,
+                                    **kwargs))
     [job.results() for job in jobs]
 
     examples = []
@@ -77,7 +77,7 @@ def _make_contrastive_dataset_job(contrastive_type,
                                   data_root='./datasets/',
                                   cuda_idx=0,
                                   seed=1,
-                                  dry_run_size=None,
+                                  subset=None,
                                   **kwargs):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -93,10 +93,10 @@ def _make_contrastive_dataset_job(contrastive_type,
     else:
         print('No cached encoded dataset found')
 
-    if dry_run_size:
-        test_ds = torch.utils.data.Subset(test_ds, range(dry_run_size))
+    if subset:
+        test_ds = torch.utils.data.Subset(test_ds, range(subset))
         if encoded_test_ds:
-            encoded_test_ds = torch.utils.data.Subset(encoded_test_ds, range(dry_run_size))
+            encoded_test_ds = torch.utils.data.Subset(encoded_test_ds, range(subset))
 
     print('Sharding dataset')
     n = len(test_ds)
@@ -124,6 +124,8 @@ def _make_contrastive_dataset_job(contrastive_type,
 
     examples = []
     example_labels = []
+
+    start = time.time()
 
     if contrastive_type == 'am':
         for i, (data, y_true) in enumerate(test_loader):
@@ -210,6 +212,8 @@ def _make_contrastive_dataset_job(contrastive_type,
                           **kwargs)
             examples.append(x_hat.cpu().detach().numpy())
             example_labels.append(tiled_target.numpy())
+    finish = time.time()
+    print(f'Time to complete: {finish - start:.1f} sec')
 
     examples = np.concatenate(examples)
     example_labels = np.concatenate(example_labels)
@@ -224,14 +228,21 @@ def _make_contrastive_dataset_job(contrastive_type,
 
 
 def _get_contrastive_dataset_shard_path(contrastive_type, dataset, classifier_net_type,
-                                        generator_net_type, shard_idx, shards):
-    return f'data/tmp/{contrastive_type}_{dataset}_{classifier_net_type}_{generator_net_type}_{shard_idx}_{shards}.npz'
+                                        generator_net_type, subset, shard_idx, shards):
+    if subset:
+        subset = int(subset)
+    return f'data/tmp/{contrastive_type}_{dataset}_{classifier_net_type}_{generator_net_type}_sub_{subset}_{shard_idx}_{shards}.npz'
 
 
-def get_contrastive_dataset_path(contrastive_type, dataset, classifier_net_type,
-                                 generator_net_type):
-    return Path(
-        f'data/{contrastive_type}_{dataset}_{classifier_net_type}_{generator_net_type}.npz')
+def get_contrastive_dataset_path(contrastive_type,
+                                 dataset,
+                                 classifier_net_type,
+                                 generator_net_type,
+                                 subset=None):
+    if subset:
+        subset = int(subset)
+    file_name = f'{contrastive_type}_{dataset}_{classifier_net_type}_{generator_net_type}_sub_{subset}'
+    return Path(f'data/{file_name}.npz')
 
 
 if __name__ == '__main__':

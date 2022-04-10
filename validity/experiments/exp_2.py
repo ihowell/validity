@@ -21,6 +21,7 @@ from validity.generators.mnist_vae import train as train_mnist_vae, \
     get_save_path as get_mnist_vae_path, encode_dataset as mnist_vae_encode_dataset
 from validity.generators.wgan_gp import train as train_wgan_gp, get_save_path as get_wgan_gp_path, \
     encode_dataset as wgan_gp_encode_dataset
+from validity.contrastive.dataset import make_contrastive_dataset
 
 from .eval_contrastive import eval_contrastive_ds, get_eval_res_path
 
@@ -49,7 +50,7 @@ def train_func(cls_type, dataset, batch_size):
     standard_train(cls, cls_path, dataset, batch_size)
 
 
-def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False):
+def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False, subset=None):
     adv_attacks = ['fgsm', 'bim', 'cwl2']
     contrastive_methods = ['am', 'xgems', 'cdeepex']
 
@@ -122,7 +123,7 @@ def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False):
     for contrastive_method in contrastive_methods:
         for gen in genorators:
             contrastive_path = get_contrastive_dataset_path(contrastive_method, in_dataset,
-                                                            cls_type, gen['type'])
+                                                            cls_type, gen['type'], subset)
             if not contrastive_path.exists():
                 if not high_performance:
                     raise Exception(
@@ -130,7 +131,7 @@ def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False):
                     )
 
                 make_contrastive_dataset(contrastive_method, in_dataset, cls_type, cls_path,
-                                         gen['type'], gen['path'])
+                                         gen['type'], gen['path'], subset)
 
     # Evaluate contrastive examples
     results = {}
