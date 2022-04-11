@@ -222,10 +222,8 @@ def _make_contrastive_dataset_job(contrastive_type,
     Path('data/tmp').mkdir(exist_ok=True, parents=True)
     shard_path = _get_contrastive_dataset_shard_path(contrastive_type, dataset,
                                                      classifier_net_type, generator_net_type,
-                                                     shard_idx, shards)
-    np.savez(
-        f'data/tmp/{contrastive_type}_{dataset}_{classifier_net_type}_{generator_net_type}_{shard_idx}_{shards}.npz',
-        examples, example_labels)
+                                                     subset, shard_idx, shards)
+    np.savez(shard_path, examples, example_labels)
 
 
 def _get_contrastive_dataset_shard_path(contrastive_type, dataset, classifier_net_type,
