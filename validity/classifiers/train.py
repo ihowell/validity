@@ -43,19 +43,29 @@ def standard_train(net,
             loss.backward()
             optimizer.step()
             if tb_path:
+                _, predicted = torch.max(outputs.data, 1)
+                total = labels.size(0)
+                correct = (predicted == labels.cuda()).sum().item()
                 writer.add_scalar('train/loss', loss.mean(), step)
+                writer.add_scalar('train/inaccuracy', 1. - correct / total, step)
             step += 1
 
         losses = []
+        val_correct = 0.
+        val_total = 0.
         with torch.no_grad():
             for data, labels in tqdm(val_loader):
                 outputs = net(data.cuda())
                 loss = criterion(outputs, labels.cuda())
                 losses.append(loss)
+                _, predicted = torch.max(outputs.data, 1)
+                val_total += labels.size(0)
+                val_correct += (predicted == labels.cuda()).sum().item()
 
         loss = torch.mean(torch.tensor(loss))
         if tb_path:
             writer.add_scalar('val/loss', loss.mean(), step)
+            writer.add_scalar('val/inaccuracy', 1. - val_correct / val_total, step)
         if early_stopping(loss):
             break
 

@@ -1,3 +1,5 @@
+from collections import defaultdict
+from itertools import product
 from pathlib import Path
 import json
 
@@ -61,7 +63,7 @@ def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False, su
     eval_vae_path = get_mnist_vae_path(beta=20., id='eval')
     eval_bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3, id='eval')
 
-    genorators = [{
+    generators = [{
         'type': 'mnist_vae',
         'path': vae_path
     }, {
@@ -121,7 +123,7 @@ def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False, su
 
     # Create contrastive examples
     for contrastive_method in contrastive_methods:
-        for gen in genorators:
+        for gen in generators:
             contrastive_path = get_contrastive_dataset_path(contrastive_method, in_dataset,
                                                             cls_type, gen['type'], subset)
             if not contrastive_path.exists():
@@ -137,11 +139,11 @@ def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False, su
     results = {}
     for contrastive_method in contrastive_methods:
         results[contrastive_method] = {}
-        for gen in genorators:
+        for gen in generators:
             results[contrastive_method][gen['type']] = {}
             for adv_attack in adv_attacks:
                 contrastive_ds_path = get_contrastive_dataset_path(
-                    contrastive_method, in_dataset, cls_type, gen['type'])
+                    contrastive_method, in_dataset, cls_type, gen['type'], subset)
                 contrastive_res_path = get_eval_res_path(contrastive_method, cls_type,
                                                          in_dataset, out_dataset, gen['type'],
                                                          adv_attack)
@@ -162,6 +164,42 @@ def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False, su
                 with open(contrastive_res_path) as in_file:
                     results[contrastive_method][gen['type']][adv_attack] = json.load(in_file)
 
+    _grid_output(adv_attacks, contrastive_methods, generators, results)
+
+
+def _grid_output(adv_attacks, contrastive_methods, generators, results):
+    headers = [['', 'Detectors', ''] +
+               sum([[c + ' ' + g['type']] + [''] * 3
+                    for (c, g) in product(contrastive_methods, generators)], []),
+               ['Attack', 'OOD Method', 'ADV Method'] +
+               ['TCV', 'ID', 'NAdv', 'CValid'] * len(contrastive_methods) * len(generators)]
+
+    table = headers
+
+    for adv_attack in adv_attacks:
+        rows = defaultdict(list)
+        for contrastive_method in contrastive_methods:
+            for gen in generators:
+                for ood_name in results[contrastive_method][
+                        gen['type']][adv_attack]['validity']:
+                    res = results[contrastive_method][gen['type']][adv_attack]
+                    for adv_name, valid in results[contrastive_method][
+                            gen['type']][adv_attack]['validity'][ood_name].items():
+                        rows[(ood_name, adv_name)] += [
+                            f'{res["target_class_validity"]:.4f}',
+                            f'{res["ood_validity"][ood_name]:.4f}',
+                            f'{res["adv_validity"][adv_name]:.4f}', f'{valid:.4f}'
+                        ]
+        rows = [['', ood, adv] + vals for ((ood, adv), vals) in rows.items()]
+        rows[0][0] = adv_attack
+
+        table = table + rows
+
+    print('')
+    print(tabulate(table, tablefmt='tsv', floatfmt='.4f'))
+
+
+def _long_table(adv_attacks, contrastive_methods, generators, results):
     #headers = [([''] * 2) + sum([[c] + [''] * 3 for c in contrastive_methods], []),
     #           ['OOD Method', 'ADV Method'] +
     #           ['TCV', 'ID', 'NAdv', 'CValid'] * len(contrastive_methods)]
@@ -172,7 +210,7 @@ def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False, su
     for adv_attack in adv_attacks:
         rows = []
         for contrastive_method in contrastive_methods:
-            for gen in genorators:
+            for gen in generators:
                 for ood_name in results[contrastive_method][
                         gen['type']][adv_attack]['validity']:
                     res = results[contrastive_method][gen['type']][adv_attack]
@@ -190,7 +228,7 @@ def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False, su
         table = table + rows
 
     print('')
-    print(tabulate(table, tablefmt='tsv', floatfmt='.4f'))
+    print(tabulate(table, tablefmt='csv', floatfmt='.4f'))
 
 
 if __name__ == '__main__':
