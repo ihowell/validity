@@ -1,0 +1,12 @@
+# Config file for CelebA dataset (200k)
+
+output_dir: '/mnt/d/research/data/models/stylegan'
+structure: 'linear'
+device_id: ('0')
+dataset:
+  name: 'cifar10'
+  img_dir: '/mnt/d/research/data/datasets'
+  folder: False
+  resolution: 32
+sched:
+  epochs: [2,4,4,4,4,8]
