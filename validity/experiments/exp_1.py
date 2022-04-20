@@ -51,8 +51,8 @@ def run_experiment(cls_type, in_dataset, out_dataset):
 
     cls_path = get_cls_path(cls_type, in_dataset)
     mnist_encode_vae_path = Path(f'data/mnist_vae_encode_{in_dataset}_test.npz')
-    mnist_encode_wgan_gp_path = Path(f'data/wgan_gp_encode_{in_dataset}_test.npz')
-    wgan_gp_path = get_wgan_gp_path(in_dataset, 10, 5)
+    # mnist_encode_wgan_gp_path = Path(f'data/wgan_gp_encode_{in_dataset}_test.npz')
+    # wgan_gp_path = get_wgan_gp_path(in_dataset, 10, 5)
     eval_vae_path = get_mnist_vae_path(beta=20., id='eval')
     eval_bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3, id='eval')
 
@@ -60,7 +60,7 @@ def run_experiment(cls_type, in_dataset, out_dataset):
     c_func(cls_path, train_func, cls_type, in_dataset, 64)
 
     # Train generative functions
-    c_func(wgan_gp_path, train_wgan_gp, in_dataset, lambda_term=10., critic_iter=5)
+    # c_func(wgan_gp_path, train_wgan_gp, in_dataset, lambda_term=10., critic_iter=5)
     c_func(eval_vae_path, train_mnist_vae, beta=20., id='eval')
     c_func(eval_bg_vae_path, train_mnist_vae, beta=20., mutation_rate=0.3, id='eval')
 
