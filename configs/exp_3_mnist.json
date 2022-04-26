@@ -1,0 +1,75 @@
+{
+    "in_dataset": "mnist",
+    "out_dataset": "fmnist",
+    "additional_out_datasets": [],
+    "classifiers": [
+        {
+            "name": "base",
+            "type": "mnist"
+        },
+        {
+            "name": "l2_reg",
+            "type": "mnist",
+            "train_kwargs": {
+                "weight_decay": 1e-2
+            }
+        },
+        {
+            "name": "grad_norm_clip",
+            "type": "mnist",
+            "train_kwargs": {
+                "max_grad_norm": 1.0
+            }
+        },
+        {
+            "name": "adv_train",
+            "type": "mnist",
+            "train_kwargs": {
+                "optim": "sgd",
+                "adv_steps": 7,
+                "adv_eps": 1e-1
+            }
+        },
+        {
+            "name": "grad_penalty",
+            "type": "mnist",
+            "train_kwargs": {
+                "lipshitz_gp": 1e-1
+            }
+        },
+        {
+            "name": "spectral_norm",
+            "type": "mnist",
+            "cls_kwargs": {
+                "spectral_normalization": true
+            }
+        }
+    ],
+    "generators": [
+        {
+            "type": "mnist_vae",
+            "kwargs": {
+                "beta": 10.0
+            }
+        },
+        {
+            "type": "wgan_gp",
+            "kwargs": {
+                "lambda_term": 10.0,
+                "critic_iter": 5
+            },
+            "encode_path": "data/wgan_gp_encode_mnist_test.npz"
+        }
+    ],
+    "adv_attacks": [
+        "fgsm",
+        "bim",
+        "cwl2"
+    ],
+    "contrastive_methods": [
+        "am",
+        "xgems",
+        "cdeepex"
+    ],
+    "contrastive_subset": 100
+}

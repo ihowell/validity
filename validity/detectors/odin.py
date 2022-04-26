@@ -22,6 +22,7 @@ from validity.datasets import load_datasets
 
 
 class ODINDetector(nn.Module):
+
     def __init__(self, network=None, noise_magnitude=None, temper=None):
         super().__init__()
         self.network = network
@@ -124,7 +125,8 @@ def train_odin(in_dataset,
                data_root='./datasets/',
                cuda_idx=0,
                magnitude=1e-2,
-               temperature=1000.):
+               temperature=1000.,
+               id=None):
 
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
@@ -137,19 +139,20 @@ def train_odin(in_dataset,
     odin = odin.cuda()
 
     _, in_test_ds = load_datasets(in_dataset)
-    in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)
     _, out_test_ds = load_datasets(out_dataset)
+    in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)
     out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=64, shuffle=True)
 
     results = odin.train(in_test_loader, out_test_loader)
 
-    save_path = pathlib.Path(
-        'ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}.pt')
+    save_name = f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}'
+    if id:
+        save_name = f'{save_name}_{id}'
+    save_path = pathlib.Path('ood') / f'{save_name}.pt'
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(odin, save_path)
 
-    res_save_path = pathlib.Path(
-        'ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}_res.pt')
+    res_save_path = pathlib.Path('ood') / f'{save_name}_res.pt'
     torch.save(results, res_save_path)
 
     print(f'Magnitude {magnitude} temperature {temperature}:')
@@ -171,7 +174,8 @@ def train_multiple_odin(in_dataset,
                         weights_path,
                         data_root='./datasets/',
                         cuda_idx=0,
-                        latex_print=False):
+                        latex_print=False,
+                        id=None):
     magnitudes = [
         0, 0.0005, 0.001, 0.0014, 0.002, 0.0024, 0.005, 0.007, 0.01, 0.014, 0.02, 0.05
     ]
@@ -181,8 +185,14 @@ def train_multiple_odin(in_dataset,
     best_auc = None
 
     for magnitude in magnitudes:
-        detector, res = train_odin(in_dataset, out_dataset, net_type, weights_path, data_root,
-                                   cuda_idx, magnitude)
+        detector, res = train_odin(in_dataset,
+                                   out_dataset,
+                                   net_type,
+                                   weights_path,
+                                   data_root,
+                                   cuda_idx,
+                                   magnitude,
+                                   id=id)
         fpr, tpr = res['plot']
         plt.plot(fpr, tpr, label=str(magnitude))
         row = [magnitude, res['auc_score'], res['fpr_at_tpr_95']]
@@ -200,7 +210,7 @@ def train_multiple_odin(in_dataset,
     plt.legend()
     plt.savefig('ood/odin_results.png')
 
-    save_path = pathlib.Path('ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_best.pt')
+    save_path = get_best_odin_path(net_type, in_dataset, out_dataset, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(best_detector, save_path)
 
@@ -240,15 +250,29 @@ def evaluate_odin(net_type, in_dataset, out_dataset, magnitude, temperature):
     print(f'Accuracy: {acc:.4f}')
 
 
-def load_odin(net_type, in_dataset, out_dataset, magnitude, temperature):
-    save_path = pathlib.Path(
-        'ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}.pt')
+def get_odin_path(net_type, in_dataset, out_dataset, magnitude, temperature, id=None):
+    save_name = f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}'
+    if id:
+        save_name = f'{save_name}_{id}'
+    return pathlib.Path('ood') / f'{save_name}.pt'
+
+
+def load_odin(net_type, in_dataset, out_dataset, magnitude, temperature, id=None):
+    save_path = get_odin_path(net_type,
+                              in_dataset,
+                              out_dataset,
+                              magnitude,
+                              temperature,
+                              id=None)
     assert save_path.exists(), f'{save_path} does not exist'
     return torch.load(save_path)
 
 
-def get_best_odin_path(net_type, in_dataset, out_dataset):
-    return pathlib.Path('ood', f'odin_{net_type}_{in_dataset}_{out_dataset}_best.pt')
+def get_best_odin_path(net_type, in_dataset, out_dataset, id=None):
+    save_name = f'odin_{net_type}_{in_dataset}_{out_dataset}'
+    if id:
+        save_name = f'{save_name}_{id}'
+    return pathlib.Path('ood') / f'{save_name}_best.pt'
 
 
 def load_best_odin(net_type, in_dataset, out_dataset):

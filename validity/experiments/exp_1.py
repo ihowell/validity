@@ -5,7 +5,7 @@ import fire
 from validity.adv_dataset import construct_dataset as construct_adv_dataset, \
     adv_dataset_exists
 from validity.classifiers.load import load_cls, get_cls_path, construct_cls
-from validity.classifiers.train import standard_train
+from validity.classifiers.train import train_ds
 from validity.contrastive.dataset import get_contrastive_dataset_path
 from validity.detectors.density import train_density_adv, get_density_path, DensityDetector
 from validity.detectors.lid import train_multiple_lid_adv, get_best_lid_path, LIDDetector
@@ -43,7 +43,7 @@ def train_func(cls_type, dataset, batch_size):
     cls_path = get_cls_path(cls_type, dataset)
     cls = cls.cuda()
     cls.train()
-    standard_train(cls, cls_path, dataset, batch_size)
+    train_ds(cls, cls_path, dataset, batch_size)
 
 
 def run_experiment(cls_type, in_dataset, out_dataset):

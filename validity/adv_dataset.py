@@ -58,7 +58,12 @@ def construct_example(dataset, attack, net_type, weights_location, data_root='./
     plt.show()
 
 
-def construct_dataset(dataset, attack, net_type, weights_location, data_root='./datasets'):
+def construct_dataset(dataset,
+                      attack,
+                      net_type,
+                      weights_location,
+                      data_root='./datasets',
+                      id=None):
     """Construct an adversarial dataset.
 
     Args:
@@ -188,33 +193,32 @@ def construct_dataset(dataset, attack, net_type, weights_location, data_root='./
     print(f'Adversarial Accuracy: {np.mean(adv_accuracy)}')
     print(f'Data after filtering: {clean_data.shape[0]}')
 
-    clean_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_clean_{net_type}.npy'
-    adv_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_adv_{net_type}.npy'
-    noisy_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_noise_{net_type}.npy'
+    files = [(f'{dataset}_{attack}_clean_{net_type}', clean_data),
+             (f'{dataset}_{attack}_adv_{net_type}', adv_data),
+             (f'{dataset}_{attack}_noise_{net_type}', noisy_data)]
+    if id:
+        files = [(f'{name}_{id}', data) for (name, data) in files]
 
-    adv_ds_path.parent.mkdir(exist_ok=True, parents=True)
-    np.save(clean_ds_path, clean_data)
-    np.save(adv_ds_path, adv_data)
-    np.save(noisy_ds_path, noisy_data)
+    data_root = pathlib.Path('adv_datasets')
+    data_root.mkdir(exist_ok=True, parents=True)
+    for name, data in files:
+        path = data_root / f'{name}.npy'
+        np.save(path, data)
 
 
-def load_adv_dataset(dataset, attack, net_type):
-    clean_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_clean_{net_type}.npy'
-    adv_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_adv_{net_type}.npy'
-    noisy_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_noise_{net_type}.npy'
+def load_adv_dataset(dataset, attack, net_type, id=None):
+    data_root = pathlib.Path('adv_datasets')
+    partitions = ['clean', 'adv', 'noise']
+    paths = [f'{dataset}_{attack}_{partition}_{net_type}' for partition in partitions]
+    if id:
+        paths = [f'{path}_{id}' for path in paths]
 
-    # assert clean_ds_path.exists(), f'{clean_ds_path} does not exist'
-    # assert adv_ds_path.exists(), f'{adv_ds_path} does not exist'
-    # assert noisy_ds_path.exists(), f'{noisy_ds_path} does not exist'
+    paths = [data_root / f'{path}.npy' for path in paths]
+    for path in paths:
+        if not path.exists():
+            return False
 
-    if not clean_ds_path.exists() or not adv_ds_path.exists() or not noisy_ds_path.exists():
-        return False
-
-    clean_data = np.load(clean_ds_path)
-    adv_data = np.load(adv_ds_path)
-    noisy_data = np.load(noisy_ds_path)
-
-    return clean_data, adv_data, noisy_data
+    return [np.load(path) for path in paths]
 
 
 def adv_dataset_exists(dataset, attack, net_type):
@@ -226,7 +230,6 @@ def adv_dataset_exists(dataset, attack, net_type):
 
 
 def calculate_channel_means(dataset):
-    channels = []
     train_ds, _ = load_datasets(dataset)
     data = np.stack([data for data, _ in train_ds])
     print(f'Mean: {np.mean(data, (0, 2, 3))}')

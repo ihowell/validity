@@ -16,7 +16,9 @@ def get_cls_path(cls_type, dataset, id=None):
     return Path(f'models/{name}.pt')
 
 
-def construct_cls(cls_type, dataset):
+def construct_cls(cls_type, dataset, cls_kwargs=None):
+    if cls_kwargs is None:
+        cls_kwargs = {}
     if dataset == 'mnist':
         num_labels = 10
         in_channels = 1
@@ -25,16 +27,16 @@ def construct_cls(cls_type, dataset):
         in_channels = 3
 
     if cls_type == 'mnist':
-        net = MnistClassifier()
+        net = MnistClassifier(**cls_kwargs)
     elif cls_type == 'resnet18':
-        net = ResNet18(num_labels, in_channels)
+        net = ResNet18(num_labels, in_channels, **cls_kwargs)
     elif cls_type == 'resnet34':
-        net = ResNet34(num_labels, in_channels)
+        net = ResNet34(num_labels, in_channels, **cls_kwargs)
     elif cls_type == 'resnet50':
-        net = ResNet50(num_labels, in_channels)
+        net = ResNet50(num_labels, in_channels, **cls_kwargs)
 
     else:
-        raise Exception(f'Unknown classifier type {classifier_type}')
+        raise Exception(f'Unknown classifier type {cls_type}')
 
     return net
 

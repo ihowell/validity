@@ -9,7 +9,7 @@ from tabulate import tabulate
 from validity.adv_dataset import construct_dataset as construct_adv_dataset, \
     adv_dataset_exists
 from validity.classifiers.load import load_cls, get_cls_path, construct_cls
-from validity.classifiers.train import train_ds
+from validity.classifiers.train import standard_train
 from validity.contrastive.dataset import get_contrastive_dataset_path
 from validity.detectors.density import train_density_adv, get_density_path, DensityDetector
 from validity.detectors.lid import train_multiple_lid_adv, get_best_lid_path, LIDDetector
@@ -44,47 +44,65 @@ def c_adv_dataset(dataset, adv_attack, net_type, cls_path):
         construct_adv_dataset(dataset, adv_attack, net_type, cls_path)
 
 
-def train_func(cls_type, dataset, batch_size):
-    cls = construct_cls(cls_type, dataset)
+def train_cls_func(cls_type, dataset, batch_size, cls_kwargs=None, train_kwargs=None):
+    train_kwargs = train_kwargs or {}
+    cls = construct_cls(cls_type, dataset, cls_kwargs=cls_kwargs)
     cls_path = get_cls_path(cls_type, dataset)
     cls = cls.cuda()
     cls.train()
-    train_ds(cls, cls_path, dataset, batch_size)
+    standard_train(cls, cls_path, dataset, batch_size, **train_kwargs)
 
 
-def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False, subset=None):
-    adv_attacks = ['fgsm', 'bim', 'cwl2']
-    contrastive_methods = ['am', 'xgems', 'cdeepex']
+def train_gen(gen_type, dataset, **kwargs):
+    if gen_type == 'mnist_vae':
+        path = get_mnist_vae_path(**kwargs)
+        c_func(path, train_mnist_vae, **kwargs)
+    elif gen_type == 'wgan_gp':
+        path = get_wgan_gp_path(dataset, kwargs['lambda_term'], kwargs['critic_iter'])
+        c_func(path, train_wgan_gp, dataset, **kwargs)
+    else:
+        raise Exception(f'Unknown gen type passed to train_gen: {gen_type}')
 
-    cls_path = get_cls_path(cls_type, in_dataset)
-    vae_path = get_mnist_vae_path(beta=10.)
-    mnist_encode_wgan_gp_path = Path('data/wgan_gp_encode_mnist_test.npz')
-    wgan_gp_path = get_wgan_gp_path(in_dataset, 10, 5)
+
+def run_experiment(cfg_file, high_performance=False):
+    with open(cfg_file) as f:
+        cfg = json.load(f)
+
+    in_dataset = cfg['in_dataset']
+
     eval_vae_path = get_mnist_vae_path(beta=20., id='eval')
     eval_bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3, id='eval')
 
-    generators = [{
-        'type': 'mnist_vae',
-        'path': vae_path
-    }, {
-        'type': 'wgan_gp',
-        'path': wgan_gp_path
-    }]
-
     # Train classifiers
-    c_func(cls_path, train_func, cls_type, in_dataset, 64)
+    for cls_cfg in cfg['classifiers']:
+        cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
+        c_func(cls_path,
+               train_cls_func,
+               cls_cfg['type'],
+               in_dataset,
+               64,
+               cls_kwargs=cls_cfg.get('cls_kwargs'),
+               train_kwargs=cls_cfg.get('train_kwargs'))
 
     # Train generative functions
-    c_func(wgan_gp_path, train_wgan_gp, in_dataset, lambda_term=10., critic_iter=5)
-    c_func(vae_path, train_mnist_vae, beta=10.)
+    for gen_cfg in cfg['generators']:
+        train_gen(gen_cfg['type'], in_dataset, gen_cfg['kwargs'])
+
     c_func(eval_vae_path, train_mnist_vae, beta=20., id='eval')
     c_func(eval_bg_vae_path, train_mnist_vae, beta=20., mutation_rate=0.3, id='eval')
 
     # Create adversarial datasets
-    for adv_attack in adv_attacks:
-        c_adv_dataset(in_dataset, adv_attack, cls_type, cls_path)
+    for cls_cfg in cfg['classifiers']:
+        cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
+        for adv_attack in cfg['adv_attacks']:
+            c_adv_dataset(in_dataset,
+                          adv_attack,
+                          cls_cfg['type'],
+                          cls_path,
+                          id=cls_cfg['name'])
 
     # Train OOD detectors
+    # for cls_cfs in cfg['classifiers']:
     odin_path = get_best_odin_path(cls_type, in_dataset, out_dataset)
     llr_path = get_llr_path(in_dataset, out_dataset, 0.3)
     mahalanobis_ood_path = get_best_mahalanobis_ood_path(cls_type, in_dataset, out_dataset)
