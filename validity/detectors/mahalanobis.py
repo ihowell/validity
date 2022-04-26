@@ -24,6 +24,7 @@ from validity.util import np_loader
 
 
 class MahalanobisDetector:
+
     def __init__(self, model=None, num_classes=None, noise_magnitude=None, net_type=None):
         self.model = model
         self.criterion = nn.CrossEntropyLoss()
@@ -513,9 +514,8 @@ def evaluate_best_mahalanobis_ood(net_type, in_dataset, out_dataset):
     print(f'Accuracy: {acc:.4f}')
 
 
-def load_mahalanobis_ood(net_type, in_dataset, out_dataset, magnitude):
-    save_path = pathlib.Path(
-        'ood', f'mahalanobis_ood_{net_type}_{in_dataset}_{out_dataset}_{magnitude}.pt')
+def load_mahalanobis_ood(net_type, in_dataset, out_dataset, magnitude, id=None):
+    save_path = get_mahalanobis_ood_path(net_type, in_dataset, out_dataset, magnitude, id=id)
     if not save_path.exists():
         return False
     return torch.load(save_path)
@@ -529,7 +529,14 @@ def load_mahalanobis_adv(net_type, dataset, adv_attack, magnitude):
     return torch.load(save_path)
 
 
-def get_best_mahalanobis_ood_path(net_type, in_dataset, out_dataset):
+def get_mahalanobis_ood_path(net_type, in_dataset, out_dataset, magnitude, id=None):
+    save_path = f'mahalanobis_{net_type}_{in_dataset}_{out_dataset}_{magnitude}'
+    if id:
+        save_path = f'{save_path}_{id}'
+    return pathlib.Path('ood') / f'{save_path}.pt'
+
+
+def get_best_mahalanobis_ood_path(net_type, in_dataset, out_dataset, id=None):
     return pathlib.Path('ood',
                         f'mahalanobis_ood_{net_type}_{in_dataset}_{out_dataset}_best.pt')
 

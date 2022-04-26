@@ -69,6 +69,7 @@ def run_experiment(cfg_file, high_performance=False):
         cfg = json.load(f)
 
     in_dataset = cfg['in_dataset']
+    out_dataset = cfg['out_dataset']
 
     eval_vae_path = get_mnist_vae_path(beta=20., id='eval')
     eval_bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3, id='eval')
@@ -102,15 +103,21 @@ def run_experiment(cfg_file, high_performance=False):
                           id=cls_cfg['name'])
 
     # Train OOD detectors
-    # for cls_cfs in cfg['classifiers']:
-    odin_path = get_best_odin_path(cls_type, in_dataset, out_dataset)
-    llr_path = get_llr_path(in_dataset, out_dataset, 0.3)
-    mahalanobis_ood_path = get_best_mahalanobis_ood_path(cls_type, in_dataset, out_dataset)
-    c_func(odin_path, train_multiple_odin, in_dataset, out_dataset, cls_type, cls_path)
-    c_func(llr_path, train_llr_ood, in_dataset, out_dataset, 'mnist_vae', eval_vae_path,
-           eval_bg_vae_path, 0.3)
-    c_func(mahalanobis_ood_path, train_multiple_mahalanobis_ood, in_dataset, out_dataset,
-           cls_type, cls_path)
+    for cls_cfg in cfg['classifiers']:
+        odin_path = get_best_odin_path(cls_cfg['type'],
+                                       in_dataset,
+                                       out_dataset,
+                                       id=cls_cfg['name'])
+        llr_path = get_llr_path(in_dataset, out_dataset, 0.3, id=cls_cfg['name'])
+        mahalanobis_ood_path = get_best_mahalanobis_ood_path(cls_cfg['type'],
+                                                             in_dataset,
+                                                             out_dataset,
+                                                             id=cls_cfg['name'])
+        c_func(odin_path, train_multiple_odin, in_dataset, out_dataset, cls_type, cls_path)
+        c_func(llr_path, train_llr_ood, in_dataset, out_dataset, 'mnist_vae', eval_vae_path,
+               eval_bg_vae_path, 0.3)
+        c_func(mahalanobis_ood_path, train_multiple_mahalanobis_ood, in_dataset, out_dataset,
+               cls_type, cls_path)
 
     # Train ADV detectors
     for adv_attack in adv_attacks:

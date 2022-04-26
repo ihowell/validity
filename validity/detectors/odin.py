@@ -225,8 +225,8 @@ def train_multiple_odin(in_dataset,
         print(tabulate(result_table))
 
 
-def evaluate_odin(net_type, in_dataset, out_dataset, magnitude, temperature):
-    odin = load_odin(net_type, in_dataset, out_dataset, magnitude, temperature)
+def evaluate_odin(net_type, in_dataset, out_dataset, magnitude, temperature, id=None):
+    odin = load_odin(net_type, in_dataset, out_dataset, magnitude, temperature, id=id)
 
     _, in_test_ds = load_datasets(in_dataset)
     _, out_test_ds = load_datasets(out_dataset)
@@ -275,8 +275,8 @@ def get_best_odin_path(net_type, in_dataset, out_dataset, id=None):
     return pathlib.Path('ood') / f'{save_name}_best.pt'
 
 
-def load_best_odin(net_type, in_dataset, out_dataset):
-    save_path = get_best_odin_path(net_type, in_dataset, out_dataset)
+def load_best_odin(net_type, in_dataset, out_dataset, id=None):
+    save_path = get_best_odin_path(net_type, in_dataset, out_dataset, id=id)
     if not save_path.exists():
         return False
     return torch.load(save_path)

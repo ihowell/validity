@@ -21,6 +21,7 @@ BANDWIDTHS = {'mnist': 1.20, 'cifar': 0.26, 'svhn': 1.00}
 
 
 class LikelihoodRatioDetector:
+
     def __init__(self, ll_est=None, bg_ll_est=None):
         self.ll_est = ll_est
         self.bg_ll_est = bg_ll_est
@@ -114,7 +115,8 @@ def train_llr_ood(in_dataset,
                   background_path,
                   mutation_rate,
                   data_root='./datasets',
-                  cuda_idx=0):
+                  cuda_idx=0,
+                  id=None):
     from validity.generators.nvae.model import load_nvae
     from validity.generators.mnist_vae import MnistVAE
     torch.cuda.manual_seed(0)
@@ -153,7 +155,7 @@ def train_llr_ood(in_dataset,
     # evaluate detector
     results = detector.evaluate(in_val_loader, out_val_loader)
 
-    save_path = pathlib.Path('ood', f'llr_{in_dataset}_{out_dataset}_{mutation_rate}_ood.pt')
+    save_path = get_llr_path(in_dataset, out_dataset, mutation_rate, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(detector, save_path)
 
@@ -169,11 +171,11 @@ def train_llr_ood(in_dataset,
     return results
 
 
-def evaluate_llr(in_dataset, out_dataset, mutation_rate):
-    llr = load_llr(in_dataset, out_dataset, mutation_rate)
+def evaluate_llr(in_dataset, out_dataset, mutation_rate, id=None):
+    llr = load_llr(in_dataset, out_dataset, mutation_rate, id=id)
 
-    in_train_ds, in_test_ds = load_datasets(in_dataset)
-    out_train_ds, out_test_ds = load_datasets(out_dataset)
+    _, in_test_ds = load_datasets(in_dataset)
+    _, out_test_ds = load_datasets(out_dataset)
 
     in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)
     out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=64, shuffle=True)
@@ -191,23 +193,29 @@ def evaluate_llr(in_dataset, out_dataset, mutation_rate):
     print(f'Accuracy: {acc:.4f}')
 
 
-def get_llr_path(in_dataset, out_dataset, mutation_rate):
-    return pathlib.Path(f'ood/llr_{in_dataset}_{out_dataset}_{mutation_rate}_ood.pt')
+def get_llr_path(in_dataset, out_dataset, mutation_rate, id=None):
+    save_name = f'llr_{in_dataset}_{out_dataset}_{mutation_rate}'
+    if id:
+        save_name = f'{save_name}_{id}'
+    return pathlib.Path('ood') / f'{save_name}.pt'
 
 
-def get_best_llr_path(in_dataset, out_dataset):
-    return pathlib.Path(f'ood/llr_{in_dataset}_{out_dataset}_best_ood.pt')
+def get_best_llr_path(in_dataset, out_dataset, id=None):
+    save_name = f'llr_{in_dataset}_{out_dataset}_best'
+    if id:
+        save_name = f'{save_name}_{id}'
+    return pathlib.Path('ood') / save_name
 
 
-def load_llr(in_dataset, out_dataset, mutation_rate):
-    save_path = get_llr_path(in_dataset, out_dataset, mutation_rate)
+def load_llr(in_dataset, out_dataset, mutation_rate, id=None):
+    save_path = get_llr_path(in_dataset, out_dataset, mutation_rate, id=id)
     if not save_path.exists():
         return False
     return torch.load(save_path)
 
 
-def load_best_llr(in_dataset, out_dataset):
-    save_path = get_best_llr_path(in_dataset, out_dataset)
+def load_best_llr(in_dataset, out_dataset, id=None):
+    save_path = get_best_llr_path(in_dataset, out_dataset, id=id)
     if not save_path.exists():
         return False
     return torch.load(save_path)
