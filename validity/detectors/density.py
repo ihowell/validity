@@ -24,6 +24,7 @@ BANDWIDTHS = {'mnist': 1.20, 'cifar10': 0.26, 'svhn': 1.00}
 
 
 class DensityDetector:
+
     def __init__(self, model=None, num_labels=None, train_ds_name=None):
         self.model = model
         self.num_labels = num_labels
@@ -116,12 +117,7 @@ class DensityDetector:
         return densities
 
 
-def train_density_adv(dataset,
-                      net_type,
-                      weights_path,
-                      adv_attack,
-                      cuda_idx=0,
-                      data_root='./datasets/'):
+def train_density_adv(dataset, net_type, weights_path, adv_attack, cuda_idx=0, id=None):
     from validity.classifiers.resnet import ResNet34
     from validity.classifiers.mnist import MnistClassifier
     from validity.adv_dataset import load_adv_dataset
@@ -140,7 +136,7 @@ def train_density_adv(dataset,
     else:
         raise Exception('Dataset provided with unknown number of labels')
 
-    clean_data, adv_data, noise_data = load_adv_dataset(dataset, adv_attack, net_type)
+    clean_data, adv_data, noise_data = load_adv_dataset(dataset, adv_attack, net_type, id=id)
     idx = np.arange(clean_data.shape[0])
     np.random.shuffle(idx)
     pivot = int(clean_data.shape[0] * 0.1)
@@ -154,6 +150,7 @@ def train_density_adv(dataset,
     noise_test_data = np.take(noise_data, test_idx, axis=0)
 
     class np_loader:
+
         def __init__(self, ds, label_is_ones, batch_size=64):
             self.ds = ds
             self.label_is_ones = label_is_ones
@@ -188,12 +185,14 @@ def train_density_adv(dataset,
     noise_test_loader = np_loader(noise_test_data, False)
     results = detector.evaluate(in_test_loader, out_test_loader, noise_test_loader)
 
-    save_path = pathlib.Path('adv', f'density_{net_type}_{dataset}_{adv_attack}.pt')
+    save_path = get_density_path(net_type, dataset, adv_attack, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(detector, save_path)
 
-    res_save_path = pathlib.Path('adv',
-                                 f'density_{net_type}_{dataset}_{adv_attack}_results.pt')
+    res_save_path = f'density_{net_type}_{dataset}_{adv_attack}'
+    if id:
+        res_save_path = f'{res_save_path}_{id}'
+    res_save_path = pathlib.Path('adv') / f'{res_save_path}_res.pt'
     torch.save(results, res_save_path)
 
     for result_name, result in results.items():
@@ -208,12 +207,15 @@ def train_density_adv(dataset,
     return results
 
 
-def get_density_path(net_type, dataset, adv_attack):
-    return pathlib.Path('adv', f'density_{net_type}_{dataset}_{adv_attack}.pt')
+def get_density_path(net_type, dataset, adv_attack, id=None):
+    save_path = f'density_{net_type}_{dataset}_{adv_attack}'
+    if id:
+        save_path = f'{save_path}_{id}'
+    return pathlib.Path('adv') / f'{save_path}.pt'
 
 
-def load_density_adv(net_type, dataset, adv_attack):
-    save_path = get_density_path(net_type, dataset, adv_attack)
+def load_density_adv(net_type, dataset, adv_attack, id=None):
+    save_path = get_density_path(net_type, dataset, adv_attack, id=id)
     if not save_path.exists():
         return False
     return torch.load(save_path)

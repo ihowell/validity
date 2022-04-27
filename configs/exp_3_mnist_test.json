@@ -7,21 +7,26 @@
             "name": "base",
             "type": "mnist",
             "train_kwargs": {
-                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_base"
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_base",
+                "max_epochs": 3
             }
         },
         {
             "name": "l2_reg",
             "type": "mnist",
             "train_kwargs": {
-                "weight_decay": 1e-2
+                "l2_penalty": 1e-2,
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_l2_reg",
+                "max_epochs": 3
             }
         },
         {
             "name": "grad_norm_clip",
             "type": "mnist",
             "train_kwargs": {
-                "max_grad_norm": 1.0
+                "max_grad_norm": 1.0,
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_grad_norm_clip",
+                "max_epochs": 3
             }
         },
         {
@@ -30,14 +35,18 @@
             "train_kwargs": {
                 "opt_name": "sgd",
                 "adv_steps": 7,
-                "adv_eps": 1e-1
+                "adv_eps": 1e-1,
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_adv_train",
+                "max_epochs": 14
             }
         },
         {
             "name": "grad_penalty",
             "type": "mnist",
             "train_kwargs": {
-                "lipshitz_gp": 1e-1
+                "lipshitz_gp": 1e-1,
+                "max_epochs": 3,
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_grad_penalty"
             }
         },
         {
@@ -45,6 +54,10 @@
             "type": "mnist",
             "cls_kwargs": {
                 "spectral_normalization": true
+            },
+            "train_kwargs": {
+                "max_epochs": 3,
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_spectral_norm"
             }
         }
     ],
@@ -54,29 +67,17 @@
             "kwargs": {
                 "beta": 10.0
             }
-        },
-        {
-            "type": "wgan_gp",
-            "kwargs": {
-                "lambda_term": 10.0,
-                "critic_iter": 5
-            },
-            "encode_path": "data/wgan_gp_encode_mnist_test.npz"
         }
     ],
     "adv_attacks": [
-        "fgsm",
-        "bim",
-        "cwl2"
+        "fgsm"
     ],
     "contrastive_methods": [
-        "am",
-        "xgems",
-        "cdeepex"
+        "am"
     ],
     "contrastive_kwargs": {
-        "shards": 40,
+        "shards": 1,
         "batch_size": 16
     },
-    "contrastive_subset": 100
+    "contrastive_subset": 1
 }

@@ -119,7 +119,7 @@ def construct_dataset(dataset,
     network = network.cuda()
     network.eval()
 
-    _, test_dataset = load_datasets(dataset)
+    _, test_dataset = load_datasets(dataset, data_root=data_root)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=64, shuffle=False)
 
     clean_data = []
@@ -221,12 +221,18 @@ def load_adv_dataset(dataset, attack, net_type, id=None):
     return [np.load(path) for path in paths]
 
 
-def adv_dataset_exists(dataset, attack, net_type):
-    clean_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_clean_{net_type}.npy'
-    adv_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_adv_{net_type}.npy'
-    noisy_ds_path = pathlib.Path('adv_datasets') / f'{dataset}_{attack}_noise_{net_type}.npy'
+def adv_dataset_exists(dataset, attack, net_type, id=None):
+    data_root = pathlib.Path('adv_datasets')
+    partitions = ['clean', 'adv', 'noise']
+    paths = [f'{dataset}_{attack}_{partition}_{net_type}' for partition in partitions]
+    if id:
+        paths = [f'{path}_{id}' for path in paths]
 
-    return clean_ds_path.exists() and adv_ds_path.exists() and noisy_ds_path.exists()
+    paths = [data_root / f'{path}.npy' for path in paths]
+    for path in paths:
+        if not path.exists():
+            return False
+    return True
 
 
 def calculate_channel_means(dataset):

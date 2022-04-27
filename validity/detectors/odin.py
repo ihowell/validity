@@ -145,13 +145,13 @@ def train_odin(in_dataset,
 
     results = odin.train(in_test_loader, out_test_loader)
 
-    save_name = f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}'
-    if id:
-        save_name = f'{save_name}_{id}'
-    save_path = pathlib.Path('ood') / f'{save_name}.pt'
+    save_path = get_odin_path(net_type, in_dataset, out_dataset, magnitude, temperature, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(odin, save_path)
 
+    save_name = f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}'
+    if id:
+        save_name = f'{save_name}_{id}'
     res_save_path = pathlib.Path('ood') / f'{save_name}_res.pt'
     torch.save(results, res_save_path)
 

@@ -122,8 +122,13 @@ def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False, su
                         f'Could not find contrastive dataset for method {contrastive_method} with generator {gen["type"]} at {contrastive_path}. Please run this expeirment in a high-performance setting and set high_performance=True.'
                     )
 
-                make_contrastive_dataset(contrastive_method, in_dataset, cls_type, cls_path,
-                                         gen['type'], gen['path'], subset)
+                make_contrastive_dataset(contrastive_method,
+                                         in_dataset,
+                                         cls_type,
+                                         cls_path,
+                                         gen['type'],
+                                         gen['path'],
+                                         subset=subset)
 
     # Evaluate contrastive examples
     results = {}

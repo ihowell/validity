@@ -9,7 +9,7 @@ from tabulate import tabulate
 from validity.adv_dataset import construct_dataset as construct_adv_dataset, \
     adv_dataset_exists
 from validity.classifiers.load import load_cls, get_cls_path, construct_cls
-from validity.classifiers.train import standard_train
+from validity.classifiers.train import train_ds
 from validity.contrastive.dataset import get_contrastive_dataset_path
 from validity.detectors.density import train_density_adv, get_density_path, DensityDetector
 from validity.detectors.lid import train_multiple_lid_adv, get_best_lid_path, LIDDetector
@@ -36,30 +36,52 @@ def c_func(path, func, *params, **kwargs):
         func(*params, **kwargs)
 
 
-def c_adv_dataset(dataset, adv_attack, net_type, cls_path):
-    if adv_dataset_exists(dataset, adv_attack, dataset):
-        print(f'Found cached adv dataset {dataset} {adv_attack} {net_type}')
+def c_adv_dataset(dataset, adv_attack, net_type, cls_path, id=None):
+    if adv_dataset_exists(dataset, adv_attack, dataset, id=id):
+        print(f'Found cached adv dataset {dataset} {adv_attack} {net_type} {id}')
     else:
-        print(f'Constructing adv dataset {dataset} {adv_attack} {net_type}')
-        construct_adv_dataset(dataset, adv_attack, net_type, cls_path)
+        print(f'Constructing adv dataset {dataset} {adv_attack} {net_type} {id}')
+        construct_adv_dataset(dataset, adv_attack, net_type, cls_path, id=id)
 
 
-def train_cls_func(cls_type, dataset, batch_size, cls_kwargs=None, train_kwargs=None):
+def train_cls_func(cls_type,
+                   cls_path,
+                   dataset,
+                   batch_size,
+                   cls_kwargs=None,
+                   train_kwargs=None):
     train_kwargs = train_kwargs or {}
     cls = construct_cls(cls_type, dataset, cls_kwargs=cls_kwargs)
-    cls_path = get_cls_path(cls_type, dataset)
     cls = cls.cuda()
     cls.train()
-    standard_train(cls, cls_path, dataset, batch_size, **train_kwargs)
+    train_ds(cls, cls_path, dataset, batch_size=batch_size, **train_kwargs)
+
+
+def get_gen_path(gen_type, dataset, **kwargs):
+    if gen_type == 'mnist_vae':
+        return get_mnist_vae_path(**kwargs)
+    elif gen_type == 'wgan_gp':
+        return get_wgan_gp_path(dataset, kwargs['lambda_term'], kwargs['critic_iter'])
+    else:
+        raise Exception(f'Unknown gen type passed to train_gen: {gen_type}')
 
 
 def train_gen(gen_type, dataset, **kwargs):
     if gen_type == 'mnist_vae':
-        path = get_mnist_vae_path(**kwargs)
-        c_func(path, train_mnist_vae, **kwargs)
+        train_mnist_vae(**kwargs)
     elif gen_type == 'wgan_gp':
-        path = get_wgan_gp_path(dataset, kwargs['lambda_term'], kwargs['critic_iter'])
-        c_func(path, train_wgan_gp, dataset, **kwargs)
+        train_wgan_gp(dataset, **kwargs)
+    else:
+        raise Exception(f'Unknown gen type passed to train_gen: {gen_type}')
+
+
+def gen_encode_dataset(gen_type, weights_path, encode_path, dataset, *args, **kwargs):
+    if gen_type == 'mnist_vae':
+        if dataset != 'mnist':
+            raise Exception("Can't encode non-MNIST dataset")
+        mnist_vae_encode_dataset(weights_path, *args, save_path=encode_path, **kwargs)
+    elif gen_type == 'wgan_gp':
+        wgan_gp_encode_dataset(dataset, weights_path, *args, encode_path=encode_path, **kwargs)
     else:
         raise Exception(f'Unknown gen type passed to train_gen: {gen_type}')
 
@@ -80,6 +102,7 @@ def run_experiment(cfg_file, high_performance=False):
         c_func(cls_path,
                train_cls_func,
                cls_cfg['type'],
+               cls_path,
                in_dataset,
                64,
                cls_kwargs=cls_cfg.get('cls_kwargs'),
@@ -87,7 +110,8 @@ def run_experiment(cfg_file, high_performance=False):
 
     # Train generative functions
     for gen_cfg in cfg['generators']:
-        train_gen(gen_cfg['type'], in_dataset, gen_cfg['kwargs'])
+        gen_path = get_gen_path(gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
+        c_func(gen_path, train_gen, gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
 
     c_func(eval_vae_path, train_mnist_vae, beta=20., id='eval')
     c_func(eval_bg_vae_path, train_mnist_vae, beta=20., mutation_rate=0.3, id='eval')
@@ -104,82 +128,193 @@ def run_experiment(cfg_file, high_performance=False):
 
     # Train OOD detectors
     for cls_cfg in cfg['classifiers']:
-        odin_path = get_best_odin_path(cls_cfg['type'],
-                                       in_dataset,
-                                       out_dataset,
-                                       id=cls_cfg['name'])
-        llr_path = get_llr_path(in_dataset, out_dataset, 0.3, id=cls_cfg['name'])
-        mahalanobis_ood_path = get_best_mahalanobis_ood_path(cls_cfg['type'],
+        cls_type = cls_cfg['type']
+        id = cls_cfg['name']
+        cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
+        odin_path = get_best_odin_path(cls_type, in_dataset, out_dataset, id=id)
+        llr_path = get_llr_path(in_dataset, out_dataset, 0.3, id=id)
+        mahalanobis_ood_path = get_best_mahalanobis_ood_path(cls_type,
                                                              in_dataset,
                                                              out_dataset,
-                                                             id=cls_cfg['name'])
-        c_func(odin_path, train_multiple_odin, in_dataset, out_dataset, cls_type, cls_path)
-        c_func(llr_path, train_llr_ood, in_dataset, out_dataset, 'mnist_vae', eval_vae_path,
-               eval_bg_vae_path, 0.3)
-        c_func(mahalanobis_ood_path, train_multiple_mahalanobis_ood, in_dataset, out_dataset,
-               cls_type, cls_path)
+                                                             id=id)
+        c_func(odin_path,
+               train_multiple_odin,
+               in_dataset,
+               out_dataset,
+               cls_type,
+               cls_path,
+               id=id)
+        c_func(llr_path,
+               train_llr_ood,
+               in_dataset,
+               out_dataset,
+               'mnist_vae',
+               eval_vae_path,
+               eval_bg_vae_path,
+               0.3,
+               id=id)
+        c_func(mahalanobis_ood_path,
+               train_multiple_mahalanobis_ood,
+               in_dataset,
+               out_dataset,
+               cls_type,
+               cls_path,
+               id=id)
 
     # Train ADV detectors
-    for adv_attack in adv_attacks:
-        density_path = get_density_path(cls_type, in_dataset, adv_attack)
-        lid_path = get_best_lid_path(cls_type, in_dataset, adv_attack)
-        mahalanobis_adv_path = get_best_mahalanobis_adv_path(cls_type, in_dataset, adv_attack)
-        c_func(density_path, train_density_adv, in_dataset, cls_type, cls_path, adv_attack)
-        c_func(lid_path, train_multiple_lid_adv, in_dataset, cls_type, cls_path, adv_attack)
-        c_func(mahalanobis_adv_path, train_multiple_mahalanobis_adv, in_dataset, cls_type,
-               cls_path, adv_attack)
+    for cls_cfg in cfg['classifiers']:
+        cls_type = cls_cfg['type']
+        id = cls_cfg['name']
+        for adv_attack in cfg['adv_attacks']:
+            density_path = get_density_path(cls_type, in_dataset, adv_attack, id=id)
+            lid_path = get_best_lid_path(cls_type, in_dataset, adv_attack, id=id)
+            mahalanobis_adv_path = get_best_mahalanobis_adv_path(cls_type,
+                                                                 in_dataset,
+                                                                 adv_attack,
+                                                                 id=id)
+            c_func(density_path,
+                   train_density_adv,
+                   in_dataset,
+                   cls_type,
+                   cls_path,
+                   adv_attack,
+                   id=id)
+            c_func(lid_path,
+                   train_multiple_lid_adv,
+                   in_dataset,
+                   cls_type,
+                   cls_path,
+                   adv_attack,
+                   id=id)
+            c_func(mahalanobis_adv_path,
+                   train_multiple_mahalanobis_adv,
+                   in_dataset,
+                   cls_type,
+                   cls_path,
+                   adv_attack,
+                   id=id)
 
     # Encode datasets
-    if not mnist_encode_wgan_gp_path.exists():
-        print(f'{mnist_encode_wgan_gp_path=}')
-        if not high_performance:
-            raise Exception(f'High-performance required to run to encode dataset.')
-        wgan_gp_encode_dataset(wgan_gp_path)
+    for gen_cfg in cfg['generators']:
+        if not 'encode_path' in gen_cfg:
+            continue
+
+        encode_path = Path(gen_cfg['encode_path'])
+        if not encode_path.exists():
+            if not high_performance:
+                raise Exception(f'High-performance required to run to encode dataset.')
+
+            gen_path = get_gen_path(gen_cfg['type'], in_dataset, gen_cfg['kwargs'])
+            print('Running get_encode_dataset, ',
+                  (gen_cfg['type'], gen_path, encode_path, in_dataset))
+            gen_encode_dataset(gen_cfg['type'], gen_path, encode_path, in_dataset,
+                               **gen_cfg.get('encode_kwargs', {}))
+        else:
+            gen_path = get_gen_path(gen_cfg['type'], in_dataset, gen_cfg['kwargs'])
+            print('Found cached get_encode_dataset, ',
+                  (gen_cfg['type'], gen_path, encode_path, in_dataset),
+                  gen_cfg.get('encode_kwargs'))
 
     # Create contrastive examples
-    for contrastive_method in contrastive_methods:
-        for gen in generators:
-            contrastive_path = get_contrastive_dataset_path(contrastive_method, in_dataset,
-                                                            cls_type, gen['type'], subset)
-            if not contrastive_path.exists():
-                if not high_performance:
-                    raise Exception(
-                        f'Could not find contrastive dataset for method {contrastive_method} with generator {gen["type"]} at {contrastive_path}. Please run this expeirment in a high-performance setting and set high_performance=True.'
-                    )
+    for cls_cfg in cfg['classifiers']:
+        cls_type = cls_cfg['type']
+        id = cls_cfg['name']
+        cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
+        for contrastive_method in cfg['contrastive_methods']:
+            for gen_cfg in cfg['generators']:
+                gen_path = get_gen_path(gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
+                contrastive_path = get_contrastive_dataset_path(
+                    contrastive_method,
+                    in_dataset,
+                    cls_type,
+                    gen_cfg['type'],
+                    classifier_id=id,
+                    subset=cfg['contrastive_subset'])
 
-                make_contrastive_dataset(contrastive_method, in_dataset, cls_type, cls_path,
-                                         gen['type'], gen['path'], subset)
+                if not contrastive_path.exists():
+                    if not high_performance:
+                        raise Exception(
+                            f'Could not find contrastive dataset for method {contrastive_method} with generator {gen_cfg["type"]} at {contrastive_path}. Please run this expeirment in a high-performance setting and set high_performance=True.'
+                        )
+                    print(
+                        'Running make_contrastive_dataset, ',
+                        (contrastive_method, in_dataset, cls_type, cls_path, gen_cfg['type'],
+                         gen_path), {
+                             'classifier_id': id,
+                             'subset': cfg['contrastive_subset'],
+                             **cfg.get('contrastive_kwargs', {})
+                         })
+                    make_contrastive_dataset(contrastive_method,
+                                             in_dataset,
+                                             cls_type,
+                                             cls_path,
+                                             gen_cfg['type'],
+                                             gen_path,
+                                             classifier_id=id,
+                                             subset=cfg['contrastive_subset'],
+                                             **cfg.get('contrastive_kwargs', {}))
+                else:
+                    print(
+                        'Found cached make_contrastive_dataset, ',
+                        (contrastive_method, in_dataset, cls_type, cls_path, gen_cfg['type'],
+                         gen_path), {
+                             'classifier_id': id,
+                             'subset': cfg['contrastive_subset'],
+                             **cfg.get('contrastive_kwargs', {})
+                         })
 
     # Evaluate contrastive examples
-    results = {}
-    for contrastive_method in contrastive_methods:
-        results[contrastive_method] = {}
-        for gen in generators:
-            results[contrastive_method][gen['type']] = {}
-            for adv_attack in adv_attacks:
-                contrastive_ds_path = get_contrastive_dataset_path(
-                    contrastive_method, in_dataset, cls_type, gen['type'], subset)
-                contrastive_res_path = get_eval_res_path(contrastive_method, cls_type,
-                                                         in_dataset, out_dataset, gen['type'],
-                                                         adv_attack)
-                if not contrastive_res_path.exists():
-                    print(f'Evaluating:')
-                    print(f'Contrastive method: {contrastive_method} with {gen["type"]}')
-                    print(f'Adversarial attack: {adv_attack}')
-                    eval_contrastive_ds(contrastive_method,
-                                        contrastive_ds_path,
-                                        cls_type,
-                                        cls_path,
-                                        in_dataset,
-                                        out_dataset,
-                                        gen['type'],
-                                        adv_attack,
-                                        verbose=True)
+    for cls_cfg in cfg['classifiers']:
+        cls_type = cls_cfg['type']
+        id = cls_cfg['name']
+        cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
+        print(f'\n\nResults for {id}:')
 
-                with open(contrastive_res_path) as in_file:
-                    results[contrastive_method][gen['type']][adv_attack] = json.load(in_file)
+        results = {}
+        for contrastive_method in cfg['contrastive_methods']:
+            results[contrastive_method] = {}
+            for gen_cfg in cfg['generators']:
+                results[contrastive_method][gen_cfg['type']] = {}
+                for adv_attack in cfg['adv_attacks']:
+                    contrastive_ds_path = get_contrastive_dataset_path(
+                        contrastive_method,
+                        in_dataset,
+                        cls_type,
+                        gen_cfg['type'],
+                        subset=cfg['contrastive_subset'],
+                        classifier_id=id)
+                    contrastive_res_path = get_eval_res_path(contrastive_method,
+                                                             cls_type,
+                                                             in_dataset,
+                                                             out_dataset,
+                                                             gen_cfg['type'],
+                                                             adv_attack,
+                                                             classifier_id=id,
+                                                             subset=cfg['contrastive_subset'])
+                    if not contrastive_res_path.exists():
+                        contrastive_res_path.parent.mkdir(parents=True, exist_ok=True)
+                        print(f'Evaluating:')
+                        print(
+                            f'Contrastive method: {contrastive_method} with {gen_cfg["type"]}')
+                        print(f'Adversarial attack: {adv_attack}')
+                        eval_contrastive_ds(contrastive_method,
+                                            contrastive_ds_path,
+                                            cls_type,
+                                            cls_path,
+                                            in_dataset,
+                                            out_dataset,
+                                            gen_cfg['type'],
+                                            adv_attack,
+                                            classifier_id=id,
+                                            subset=cfg['contrastive_subset'],
+                                            verbose=True)
 
-    _grid_output(adv_attacks, contrastive_methods, generators, results)
+                    with open(contrastive_res_path) as in_file:
+                        results[contrastive_method][gen_cfg['type']][adv_attack] = json.load(
+                            in_file)
+
+        _grid_output(cfg['adv_attacks'], cfg['contrastive_methods'], cfg['generators'],
+                     results)
 
 
 def _grid_output(adv_attacks, contrastive_methods, generators, results):

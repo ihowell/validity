@@ -32,7 +32,9 @@ def eval_contrastive_ds(contrastive_method,
                         data_root='./datasets/',
                         adv_step=True,
                         batch_size=64,
-                        verbose=False):
+                        verbose=False,
+                        classifier_id=None,
+                        subset=None):
     torch.cuda.manual_seed(0)
 
     # Load datasets
@@ -44,7 +46,8 @@ def eval_contrastive_ds(contrastive_method,
                                                   out_ds_name,
                                                   cls_type,
                                                   adv_attack,
-                                                  adv_step=adv_step)
+                                                  adv_step=adv_step,
+                                                  id=classifier_id)
 
     cls = load_cls(cls_type, cls_weights_path, in_ds_name)
     cls.cuda()
@@ -111,8 +114,14 @@ def eval_contrastive_ds(contrastive_method,
     print(tabulate(result_table))
 
     with open(
-            get_eval_res_path(contrastive_method, cls_type, in_ds_name, out_ds_name, gen_name,
-                              adv_attack), 'w') as out_file:
+            get_eval_res_path(contrastive_method,
+                              cls_type,
+                              in_ds_name,
+                              out_ds_name,
+                              gen_name,
+                              adv_attack,
+                              classifier_id=classifier_id,
+                              subset=subset), 'w') as out_file:
         json.dump(
             {
                 'target_class_validity': float(cls_preds.mean()),
@@ -122,11 +131,21 @@ def eval_contrastive_ds(contrastive_method,
             }, out_file)
 
 
-def get_eval_res_path(contrastive_method, cls_type, in_ds_name, out_ds_name, gen_name,
-                      adv_attack):
-    return Path(
-        f'data/eval_{contrastive_method}_{cls_type}_{in_ds_name}_{out_ds_name}_{gen_name}_{adv_attack}.json'
-    )
+def get_eval_res_path(contrastive_method,
+                      cls_type,
+                      in_ds_name,
+                      out_ds_name,
+                      gen_name,
+                      adv_attack,
+                      classifier_id=None,
+                      subset=None):
+    save_path = f'eval_{contrastive_method}_{cls_type}'
+    if classifier_id:
+        save_path += f'_{classifier_id}'
+    save_path += f'_{in_ds_name}_{out_ds_name}_{gen_name}_{adv_attack}'
+    if subset:
+        save_path += f'_{int(subset)}'
+    return Path(f'data/eval/{save_path}.json')
 
 
 if __name__ == '__main__':

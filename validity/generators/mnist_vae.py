@@ -20,6 +20,7 @@ CLIP_GRAD_VALUE = 10.
 
 
 class MnistVAE(nn.Module):
+
     def __init__(self, beta=1.):
         super().__init__()
         self.beta = beta
@@ -295,6 +296,7 @@ def encode_dataset(weights_path,
                    batch_size=512,
                    data_root='./datasets/',
                    cuda_idx=0,
+                   save_path=None,
                    seed=0,
                    id=None):
     torch.backends.cudnn.deterministic = True
@@ -319,11 +321,16 @@ def encode_dataset(weights_path,
     test_data = np.concatenate(test_data)
     test_labels = np.concatenate(test_labels)
 
-    pathlib.Path('data').mkdir(exist_ok=True)
-    save_path = 'mnist_vae_encode_mnist_test'
-    if id:
-        save_path += f'_{id}'
-    np.savez(f'data/{save_path}.npz', test_data, test_labels)
+    if save_path is None:
+        save_path = 'mnist_vae_encode_mnist_test'
+        if id:
+            save_path += f'_{id}'
+        save_path = pathlib.Path('data') / f'{save_path}.npz'
+
+    if not save_path.parent.exists():
+        save_path.parent.mkdir(exist_ok=True, parents=True)
+
+    np.savez(save_path, test_data, test_labels)
 
 
 def get_save_path(beta=1., mutation_rate=None, anneal_epochs=None, warm_epochs=None, id=None):

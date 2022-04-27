@@ -25,6 +25,7 @@ def loop_gen(gen):
 
 
 class np_loader:
+
     def __init__(self, ds, label_is_ones):
         self.ds = ds
         self.label_is_ones = label_is_ones
@@ -41,6 +42,7 @@ class np_loader:
 
 
 class EarlyStopping:
+
     def __init__(self,
                  vars_to_save=None,
                  save_path=None,
@@ -92,6 +94,7 @@ class EarlyStopping:
 
 
 class NPZDataset(torch.utils.data.Dataset):
+
     def __init__(self, path, transform=None, target_transform=None):
         self.path = path
         self.transform = transform
@@ -115,6 +118,7 @@ class NPZDataset(torch.utils.data.Dataset):
 
 
 class ZipDataset(torch.utils.data.Dataset):
+
     def __init__(self, ds1, ds2):
         assert len(ds1) == len(ds2)
         self._ds1 = ds1
@@ -125,3 +129,30 @@ class ZipDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         return self._ds1[idx], self._ds2[idx]
+
+
+class TiledDataset(torch.utils.data.Dataset):
+    """
+    Returns a dataset that tiles each input of the root dataset with all classes
+    for each datum except for the original class. This is used for contrastive
+    dataset generation.
+
+    Assumes the underlying dataset has a `__getitem__` function that returns `(image, target)`
+    where `target` is the label of the image and is in the range `[0, num_labels)`.
+    """
+
+    def __init__(self, root_dataset, num_labels):
+        self._root_dataset = root_dataset
+        self._num_labels = num_labels
+
+    def __len__(self):
+        return len(self._root_dataset) * (self._num_labels - 1)
+
+    def __getitem__(self, idx):
+        (image, target) = self._root_dataset[idx // (self._num_labels - 1)]
+        label_offset = idx % (self._num_labels - 1)
+        if label_offset >= target:
+            new_target = label_offset + 1
+        else:
+            new_target = label_offset
+        return (image, new_target)

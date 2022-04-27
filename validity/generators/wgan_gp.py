@@ -19,6 +19,7 @@ from validity.util import EarlyStopping, loop_gen, get_executor
 
 
 class WGAN_GP(nn.Module):
+
     def __init__(self, critic_iter=5, lambda_term=10, num_channels=3):
         super().__init__()
         self.critic_iter = critic_iter
@@ -246,7 +247,8 @@ def encode_dataset(dataset,
                    batch_size=64,
                    data_root='./datasets/',
                    cuda_idx=0,
-                   seed=0):
+                   seed=0,
+                   encode_path=None):
     executor = get_executor()
     jobs = []
     with executor.batch():
@@ -265,7 +267,11 @@ def encode_dataset(dataset,
     test_data = np.concatenate(test_data)
     test_labels = np.concatenate(test_labels)
 
-    np.savez(f'data/wgan_gp_encode_{dataset}_test.npz', test_data, test_labels)
+    if save_path is None:
+        save_path = f'data/wgan_gp_encode_{dataset}_test.npz'
+    save_path = pathlib.Path(save_path)
+    save_path.parent.mkdir(exist_ok=True, parents=True)
+    np.savez(save_path, test_data, test_labels)
 
 
 def _encode_dataset_job(dataset,

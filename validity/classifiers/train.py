@@ -5,7 +5,7 @@ from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader
 import torch.autograd as autograd
 from tensorboardX import SummaryWriter
-
+from pathlib import Path
 from tqdm import tqdm
 
 from validity.datasets import load_datasets
@@ -26,12 +26,12 @@ def train(net,
           train_set,
           val_set,
           test_set,
-          optim='adam',
+          opt_name='adam',
           batch_size=64,
           max_epochs=1000,
           tensorboard_path=None,
           lr=1e-3,
-          l2_penalty=None,
+          l2_penalty=0.,
           max_grad_norm=None,
           lipshitz_gp=None,
           adv_steps=None,
@@ -51,14 +51,21 @@ def train(net,
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=True)
     criterion = nn.CrossEntropyLoss()
 
-    if optim == 'sgd':
+    if opt_name == 'sgd':
         opt = optim.SGD(net.parameters(), lr=lr, weight_decay=l2_penalty)
-    elif optim == 'adam':
+    elif opt_name == 'adam':
         opt = optim.Adam(net.parameters(), lr=lr, weight_decay=l2_penalty)
+    else:
+        raise Exception(f'No valid optimizer specified: {opt_name}')
 
-    early_stopping = EarlyStopping(net.state_dict(), save_path)
+    Path(save_path).parent.mkdir(exist_ok=True, parents=True)
+    early_stopping = EarlyStopping({
+        'args': net.get_args(),
+        'state_dict': net.state_dict()
+    }, save_path)
+    tb_writer = None
     if tensorboard_path:
-        writer = SummaryWriter(tensorboard_path)
+        tb_writer = SummaryWriter(tensorboard_path)
 
     step = 0
     _max_epochs = max_epochs if adv_steps is None else max_epochs // adv_steps
@@ -75,30 +82,29 @@ def train(net,
                 loss = criterion(outputs, labels.cuda())
 
                 if lipshitz_gp:
-                    gradients = autograd.grad(outputs=outputs, inputs=data,
-                                              create_graph=True)[0]
+                    gradients = autograd.grad(outputs=loss, inputs=data, create_graph=True)[0]
                     grad_norm = gradients.square().sum((2, 3)).sqrt()
                     grad_penalty = (grad_norm - 1.).square() * lipshitz_gp
 
-                    if writer and adv_step == 0:
-                        writer.add_scalar('train/grad_norm', grad_norm, step)
+                    if tb_writer and adv_step == 0:
+                        tb_writer.add_scalar('train/grad_norm', grad_norm.mean(), step)
 
-                    loss += grad_penalty
+                    loss += grad_penalty.mean()
 
                 loss.backward()
 
-                if writer and adv_step == 0:
+                if tb_writer and adv_step == 0:
                     _, predicted = torch.max(outputs.data, 1)
                     total = labels.size(0)
                     correct = (predicted == labels.cuda()).sum().item()
-                    writer.add_scalar('train/loss', loss.mean(), step)
-                    writer.add_scalar('train/inaccuracy', 1. - correct / total, step)
+                    tb_writer.add_scalar('train/loss', loss.mean(), step)
+                    tb_writer.add_scalar('train/inaccuracy', 1. - correct / total, step)
 
                 if max_grad_norm:
                     total_norm = clip_grad_norm_(net.parameters(), max_grad_norm)
 
-                    if writer and adv_step == 0:
-                        writer.add_scalar('train/total_norm', total_norm)
+                    if tb_writer and adv_step == 0:
+                        tb_writer.add_scalar('train/total_norm', total_norm)
 
                 opt.step()
 
@@ -108,8 +114,8 @@ def train(net,
                         delta.clamp_(-adv_eps, adv_eps)
 
             step += 1
-            if writer:
-                writer.add_scalar('train/loss', loss, step)
+            if tb_writer:
+                tb_writer.add_scalar('train/loss', loss, step)
 
         losses = []
         val_correct = 0.
@@ -120,15 +126,15 @@ def train(net,
                 loss = criterion(outputs, labels.cuda())
                 losses.append(loss)
 
-                if writer:
+                if tb_writer:
                     _, predicted = torch.max(outputs.data, 1)
                     val_total += labels.size(0)
                     val_correct += (predicted == labels.cuda()).sum().item()
 
         loss = torch.mean(torch.tensor(loss))
-        if writer:
-            writer.add_scalar('val/loss', loss, step)
-            writer.add_scalar('val/inaccuracy', 1. - val_correct / val_total, step)
+        if tb_writer:
+            tb_writer.add_scalar('val/loss', loss, step)
+            tb_writer.add_scalar('val/inaccuracy', 1. - val_correct / val_total, step)
 
         if early_stopping(loss):
             break
@@ -145,9 +151,9 @@ def train(net,
             total += labels.size(0)
             correct += (predicted == labels.cuda()).sum().item()
 
-    if writer:
+    if tb_writer:
         loss = torch.mean(torch.tensor(losses))
-        writer.add_scalar('test/accuracy', loss)
-        writer.add_scalar('test/accuracy', correct / total)
+        tb_writer.add_scalar('test/accuracy', loss)
+        tb_writer.add_scalar('test/accuracy', correct / total)
 
     print(f'Accuracy {correct / total}')

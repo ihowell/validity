@@ -24,6 +24,7 @@ from validity.classifiers.load import load_cls
 
 
 class LIDDetector:
+
     def __init__(self, model=None, net_type=None, k=None, dataset=None, estimate_size=128):
         self.model = model
         self.criterion = nn.CrossEntropyLoss()
@@ -186,9 +187,9 @@ def train_lid_adv(dataset,
                   weights_path,
                   adv_attack,
                   batch_size=128,
-                  data_root='./datasets',
                   cuda_idx=0,
-                  k=10):
+                  k=10,
+                  id=None):
     from validity.classifiers.resnet import ResNet34
     from validity.classifiers.mnist import MnistClassifier
     from validity.adv_dataset import load_adv_dataset
@@ -199,9 +200,10 @@ def train_lid_adv(dataset,
     network = network.cuda()
     network.eval()
 
-    clean_data, adv_data, noisy_data = load_adv_dataset(dataset, adv_attack, net_type)
+    clean_data, adv_data, noisy_data = load_adv_dataset(dataset, adv_attack, net_type, id=id)
 
     class np_loader:
+
         def __init__(self, ds, label_is_ones):
             self.ds = ds
             self.label_is_ones = label_is_ones
@@ -223,11 +225,14 @@ def train_lid_adv(dataset,
     noise_test_loader = np_loader(noisy_data, True)
     results = detector.evaluate(in_test_loader, out_test_loader, noise_test_loader)
 
-    save_path = pathlib.Path('adv', f'lid_{net_type}_{dataset}_{adv_attack}_{k}.pt')
+    save_path = get_lid_path(net_type, dataset, adv_attack, k, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(detector, save_path)
 
-    save_res_path = pathlib.Path('adv', f'lid_{net_type}_{dataset}_{adv_attack}_{k}_res.pt')
+    save_res_path = f'lid_{net_type}_{dataset}_{adv_attack}_{k}'
+    if id:
+        save_res_path = f'{save_res_path}_{id}'
+    save_res_path = pathlib.Path('adv') / f'{save_res_path}_res.pt'
     torch.save(results, save_res_path)
 
     print(f'K = {k}:')
@@ -248,9 +253,9 @@ def train_multiple_lid_adv(dataset,
                            weights_path,
                            adv_attack,
                            batch_size=128,
-                           data_root='./datasets/',
                            cuda_idx=0,
-                           latex_print=False):
+                           latex_print=False,
+                           id=None):
     k_list = range(10, 100, 10)
     result_table = [['K', 'AUC Score', 'FPR at TPR=0.95']]
 
@@ -263,9 +268,9 @@ def train_multiple_lid_adv(dataset,
                                       weights_path,
                                       adv_attack,
                                       batch_size=batch_size,
-                                      data_root=data_root,
                                       cuda_idx=cuda_idx,
-                                      k=k)
+                                      k=k,
+                                      id=id)
         fpr, tpr = res['plot']
         plt.plot(fpr, tpr, label=str(k))
         row = [k, res['auc_score'], res['fpr_at_tpr_95']]
@@ -278,7 +283,7 @@ def train_multiple_lid_adv(dataset,
             best_detector = detector
             best_auc = res['auc_score']
 
-    save_path = pathlib.Path('adv', f'lid_{net_type}_{dataset}_{adv_attack}_best.pt')
+    save_path = get_best_lid_path(net_type, dataset, adv_attack, id=id)
     torch.save(best_detector, save_path)
 
     plt.xlabel('FPR')
@@ -297,19 +302,29 @@ def train_multiple_lid_adv(dataset,
         print(tabulate(result_table))
 
 
-def load_lid(net_type, dataset, adv_attack, k):
-    save_path = pathlib.Path(f'adv/lid_{net_type}_{dataset}_{adv_attack}_{k}.pt')
+def get_lid_path(net_type, dataset, adv_attack, k, id=None):
+    save_path = f'lid_{net_type}_{dataset}_{adv_attack}_{k}'
+    if id:
+        save_path = f'{save_path}_{id}'
+    return pathlib.Path('adv') / f'{save_path}.pt'
+
+
+def load_lid(net_type, dataset, adv_attack, k, id=None):
+    save_path = get_lid_path(net_type, dataset, adv_attack, k, id=id)
     if not save_path.exists():
         return None
     return torch.load(save_path)
 
 
-def get_best_lid_path(net_type, dataset, adv_attack):
-    return pathlib.Path(f'adv/lid_{net_type}_{dataset}_{adv_attack}_best.pt')
+def get_best_lid_path(net_type, dataset, adv_attack, id=None):
+    save_path = f'lid_{net_type}_{dataset}_{adv_attack}'
+    if id:
+        save_path = f'{save_path}_{id}'
+    return pathlib.Path('adv') / f'{save_path}_best.pt'
 
 
-def load_best_lid(net_type, dataset, adv_attack):
-    save_path = get_best_lid_path(net_type, dataset, adv_attack)
+def load_best_lid(net_type, dataset, adv_attack, id=None):
+    save_path = get_best_lid_path(net_type, dataset, adv_attack, id=id)
     if not save_path.exists():
         return False
     return torch.load(save_path)

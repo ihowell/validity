@@ -2,22 +2,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.parametrizations import spectral_norm
-from tqdm import tqdm
-from tensorboardX import SummaryWriter
-import fire
-
-from torchvision import transforms, datasets
-import numpy as np
-
-from validity.classifiers.train import standard_train, adversarial_train_for_free
-from validity.datasets import load_datasets
-from validity.util import EarlyStopping
 
 
 class MnistClassifier(nn.Module):
 
+    @classmethod
+    def load(cls, saved_dict):
+        args = saved_dict['args']
+        self = cls(**args)
+        self.load_state_dict(saved_dict['state_dict'])
+        return self
+
     def __init__(self, spectral_normalization=False):
         super().__init__()
+        self.spectral_normalization = spectral_normalization
         self.conv1 = nn.Conv2d(1, 32, 5)
         self.conv2 = nn.Conv2d(32, 20, 5)
         self.dense = nn.Linear(3380, 10)
@@ -26,6 +24,9 @@ class MnistClassifier(nn.Module):
             self.conv1 = spectral_norm(self.conv1)
             self.conv2 = spectral_norm(self.conv2)
             self.dense = spectral_norm(self.dense)
+
+    def get_args(self):
+        return {'spectral_normalization': self.spectral_normalization}
 
     def forward(self, x):
         out = x

@@ -201,10 +201,10 @@ def get_llr_path(in_dataset, out_dataset, mutation_rate, id=None):
 
 
 def get_best_llr_path(in_dataset, out_dataset, id=None):
-    save_name = f'llr_{in_dataset}_{out_dataset}_best'
+    save_name = f'llr_{in_dataset}_{out_dataset}'
     if id:
         save_name = f'{save_name}_{id}'
-    return pathlib.Path('ood') / save_name
+    return pathlib.Path('ood') / f'{save_name}_best.pt'
 
 
 def load_llr(in_dataset, out_dataset, mutation_rate, id=None):
