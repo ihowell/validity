@@ -15,7 +15,7 @@
             "type": "mnist",
             "train_kwargs": {
                 "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_l2_reg",
-                "weight_decay": 1e-2
+                "l2_penalty": 1e-2
             }
         },
         {

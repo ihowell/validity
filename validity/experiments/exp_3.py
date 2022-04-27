@@ -23,6 +23,7 @@ from validity.generators.mnist_vae import train as train_mnist_vae, \
 from validity.generators.wgan_gp import train as train_wgan_gp, get_save_path as get_wgan_gp_path, \
     encode_dataset as wgan_gp_encode_dataset
 from validity.contrastive.dataset import make_contrastive_dataset
+from validity.util import get_executor
 
 from .eval_contrastive import eval_contrastive_ds, get_eval_res_path
 
@@ -89,6 +90,38 @@ def run_experiment(cfg_file, high_performance=False):
     with open(cfg_file) as f:
         cfg = json.load(f)
 
+    if high_performance:
+        executor = get_executor()
+        job = executor.submit(make_generators, cfg)
+        job.results()
+
+        jobs = []
+        with executor.batch():
+            for cls_cfg in cfg['classifiers']:
+                jobs.append(
+                    executor.submit(run_sub_experiment, cfg, cls_cfg, high_performance=True))
+        [job.results() for job in jobs]
+    else:
+        make_generators(cfg)
+        for cls_cfg in cfg['classifiers']:
+            run_sub_experiment(cfg, cls_cfg, high_performance=False)
+
+
+def make_generators(cfg):
+    in_dataset = cfg['in_dataset']
+    eval_vae_path = get_mnist_vae_path(beta=20., id='eval')
+    eval_bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3, id='eval')
+
+    # Train generative functions
+    for gen_cfg in cfg['generators']:
+        gen_path = get_gen_path(gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
+        c_func(gen_path, train_gen, gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
+
+    c_func(eval_vae_path, train_mnist_vae, beta=20., id='eval')
+    c_func(eval_bg_vae_path, train_mnist_vae, beta=20., mutation_rate=0.3, id='eval')
+
+
+def run_sub_experiment(cfg, cls_cfg, high_performance=False):
     in_dataset = cfg['in_dataset']
     out_dataset = cfg['out_dataset']
 
@@ -106,14 +139,6 @@ def run_experiment(cfg_file, high_performance=False):
                64,
                cls_kwargs=cls_cfg.get('cls_kwargs'),
                train_kwargs=cls_cfg.get('train_kwargs'))
-
-    # Train generative functions
-    for gen_cfg in cfg['generators']:
-        gen_path = get_gen_path(gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
-        c_func(gen_path, train_gen, gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
-
-    c_func(eval_vae_path, train_mnist_vae, beta=20., id='eval')
-    c_func(eval_bg_vae_path, train_mnist_vae, beta=20., mutation_rate=0.3, id='eval')
 
     # Create adversarial datasets
     for cls_cfg in cfg['classifiers']:
