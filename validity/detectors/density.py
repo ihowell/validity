@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import fire
 import torch
+import torch.nn as nn
 from tqdm import tqdm
 from torchvision import datasets, transforms
 
@@ -23,19 +24,42 @@ from validity.datasets import load_datasets
 BANDWIDTHS = {'mnist': 1.20, 'cifar10': 0.26, 'svhn': 1.00}
 
 
-class DensityDetector:
+class DensityDetector(nn.Module):
 
-    def __init__(self, model=None, num_labels=None, train_ds_name=None):
-        self.model = model
+    @classmethod
+    def load(cls, saved_dict):
+        detector = cls(**saved_dict['args'])
+        return detector
+
+    def __init__(self,
+                 classifier_path=None,
+                 num_labels=None,
+                 train_ds_name=None,
+                 _kdes=None,
+                 _lr=None):
+        super().__init__()
+        self.classifier_path = classifier_path
         self.num_labels = num_labels
         self.train_ds_name = train_ds_name
 
-        self.kdes = None
-        self.lr = None
+        self.kdes = _kdes
+        self.lr = _lr
+
+        self.classifier = load_cls(classifier_path)
+        self.classifier.eval()
+
+    def get_save_dict(self):
+        return {
+            'args': {
+                'classifier_path': self.classifier_path,
+                'num_labels': self.num_labels,
+                'train_ds_name': self.train_ds_name,
+                '_kdes': self.kdes,
+                '_lr': self.lr
+            }
+        }
 
     def train_kdes(self, in_train_loader):
-        self.model.eval()
-
         self.kdes = {}
         for label in range(self.num_labels):
             activations = []
@@ -47,7 +71,7 @@ class DensityDetector:
                 data = torch.index_select(data, 0, idx)
                 if data.shape[0] == 0:
                     continue
-                activ = self.model.penultimate_forward(data)[1]
+                activ = self.classifier.penultimate_forward(data)[1]
                 activations.append(activ.detach().cpu().numpy())
             activations = np.concatenate(activations)
             activations = np.reshape(activations, (activations.shape[0], -1))
@@ -101,7 +125,7 @@ class DensityDetector:
         activations = []
         for data, _ in tqdm(loader, desc='Computing activations'):
             data = data.cuda()
-            activ = self.model.penultimate_forward(data)[1]
+            activ = self.classifier.penultimate_forward(data)[1]
             activations.append(activ.detach().cpu().numpy())
         activations = np.concatenate(activations)
         activations = np.reshape(activations, (activations.shape[0], -1))
@@ -118,16 +142,10 @@ class DensityDetector:
 
 
 def train_density_adv(dataset, net_type, weights_path, adv_attack, cuda_idx=0, id=None):
-    from validity.classifiers.resnet import ResNet34
-    from validity.classifiers.mnist import MnistClassifier
     from validity.adv_dataset import load_adv_dataset
     torch.cuda.manual_seed(0)
     np.random.seed(0)
     torch.cuda.set_device(cuda_idx)
-
-    network = load_cls(net_type, weights_path, dataset)
-    network = network.cuda()
-    network.eval()
 
     if dataset == 'mnist':
         num_labels = 10
@@ -166,7 +184,10 @@ def train_density_adv(dataset, net_type, weights_path, adv_attack, cuda_idx=0, i
                 batch = self.ds[i * self.batch_size:(i + 1) * self.batch_size]
                 yield torch.tensor(batch), torch.tensor(label)
 
-    detector = DensityDetector(model=network, num_labels=num_labels, train_ds_name=dataset)
+    detector = DensityDetector(classifier_path=weights_path,
+                               num_labels=num_labels,
+                               train_ds_name=dataset)
+    detector.cuda()
 
     print('Training KDEs')
     in_train_ds, _ = load_datasets(dataset)
@@ -187,7 +208,7 @@ def train_density_adv(dataset, net_type, weights_path, adv_attack, cuda_idx=0, i
 
     save_path = get_density_path(net_type, dataset, adv_attack, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(detector, save_path)
+    torch.save(detector.get_save_dict(), save_path)
 
     res_save_path = f'density_{net_type}_{dataset}_{adv_attack}'
     if id:
@@ -218,7 +239,8 @@ def load_density_adv(net_type, dataset, adv_attack, id=None):
     save_path = get_density_path(net_type, dataset, adv_attack, id=id)
     if not save_path.exists():
         return False
-    return torch.load(save_path)
+    save_dict = torch.load(save_path)
+    return DensityDetector.load(save_dict)
 
 
 if __name__ == '__main__':

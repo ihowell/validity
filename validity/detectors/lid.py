@@ -23,20 +23,47 @@ from validity.datasets import load_datasets
 from validity.classifiers.load import load_cls
 
 
-class LIDDetector:
+class LIDDetector(nn.Module):
 
-    def __init__(self, model=None, net_type=None, k=None, dataset=None, estimate_size=128):
-        self.model = model
-        self.criterion = nn.CrossEntropyLoss()
-        self.net_type = net_type
+    @classmethod
+    def load(cls, saved_dict):
+        detector = cls(**saved_dict['args'])
+        return detector
+
+    def __init__(self,
+                 classifier_path=None,
+                 k=None,
+                 dataset=None,
+                 estimate_size=128,
+                 _num_outputs=None,
+                 _lr=None):
+        super().__init__()
+        self.classifier_path = classifier_path
         self.k = k
         self.dataset = dataset
         self.estimate_size = estimate_size
 
+        self.num_outputs = _num_outputs
+        self.lr = _lr
+
+        # Don't need to save to disk
+        self.classifier = load_cls(self.classifier_path)
+        self.classifier.eval()
+        self.criterion = nn.CrossEntropyLoss()
+
         self._estimate_loader = None
-        self.feature_list = None
-        self.num_outputs = None
-        self.lr = None
+
+    def get_save_dict(self):
+        return {
+            'args': {
+                'classifier_path': self.classifier_path,
+                'k': self.k,
+                'dataset': self.dataset,
+                'estimate_size': self.estimate_size,
+                '_num_outputs': self.num_outputs,
+                '_lr': self.lr
+            }
+        }
 
     def sample_estimate(self):
         if self._estimate_loader is None:
@@ -47,6 +74,8 @@ class LIDDetector:
     def predict(self, x):
         assert self.lr is not None
         x = x.type(torch.float)
+        if self.num_outputs is None:
+            self.set_num_outputs(x)
         estimate, _ = self.sample_estimate()
         scores = self.score(estimate.cuda(), x)
         return -self.lr.predict(scores) + 1.
@@ -54,18 +83,19 @@ class LIDDetector:
     def predict_proba(self, x):
         assert self.lr is not None
         x = x.type(torch.float)
+        if self.num_outputs is None:
+            self.set_num_outputs(x)
         estimate, _ = self.sample_estimate()
         scores = self.score(estimate.cuda(), x)
         return -self.lr.predict_proba(scores) + 1.
 
-    def evaluate(self, in_test_loader, out_test_loader, noise_test_loader):
-        self.model.eval()
+    def set_num_outputs(self, data):
+        temp_list = self.classifier.feature_list(data.cuda())[1]
+        self.num_outputs = len(temp_list)
 
+    def evaluate(self, in_test_loader, out_test_loader, noise_test_loader):
         if self.num_outputs is None:
-            for data, label in in_test_loader:
-                temp_list = self.model.feature_list(data.cuda())[1]
-                break
-            self.num_outputs = len(temp_list)
+            self.set_num_outputs(next(iter(in_test_loader))[0])
 
         # Compute LID scores for in and out distributions
         print('Computing LID')
@@ -131,8 +161,8 @@ class LIDDetector:
         LID = []
 
         # Activations
-        output, out_features = self.model.feature_list(data)
-        est_out, est_features = self.model.feature_list(estimate_data)
+        _, out_features = self.classifier.feature_list(data)
+        _, est_features = self.classifier.feature_list(estimate_data)
         X_act = []
         Est_act = []
         for i in range(self.num_outputs):
@@ -152,16 +182,9 @@ class LIDDetector:
         for j in range(self.num_outputs):
             lid_score = mle_batch(Est_act[j], X_act[j], k=self.k)
             lid_score = lid_score.reshape((lid_score.shape[0], -1))
-
             LID_list.append(lid_score)
 
         LID = np.concatenate(LID_list, axis=1)
-        # LID_concat = LID_list[0]
-        # for i in range(1, self.num_outputs):
-        #     LID_concat = np.concatenate((LID_concat, LID_list[i]), axis=1)
-
-        # LID.extend(LID_concat)
-
         return LID
 
 
@@ -190,15 +213,9 @@ def train_lid_adv(dataset,
                   cuda_idx=0,
                   k=10,
                   id=None):
-    from validity.classifiers.resnet import ResNet34
-    from validity.classifiers.mnist import MnistClassifier
     from validity.adv_dataset import load_adv_dataset
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
-
-    network = load_cls(net_type, weights_path, dataset)
-    network = network.cuda()
-    network.eval()
 
     clean_data, adv_data, noisy_data = load_adv_dataset(dataset, adv_attack, net_type, id=id)
 
@@ -218,7 +235,8 @@ def train_lid_adv(dataset,
                 batch = self.ds[i * batch_size:(i + 1) * batch_size]
                 yield torch.tensor(batch), torch.tensor(label)
 
-    detector = LIDDetector(model=network, net_type='resnet', k=k, dataset=dataset)
+    detector = LIDDetector(classifier_path=weights_path, k=k, dataset=dataset)
+    detector.cuda()
 
     in_test_loader = np_loader(clean_data, True)
     out_test_loader = np_loader(adv_data, False)
@@ -227,7 +245,7 @@ def train_lid_adv(dataset,
 
     save_path = get_lid_path(net_type, dataset, adv_attack, k, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(detector, save_path)
+    torch.save(detector.get_save_dict(), save_path)
 
     save_res_path = f'lid_{net_type}_{dataset}_{adv_attack}_{k}'
     if id:
@@ -284,7 +302,7 @@ def train_multiple_lid_adv(dataset,
             best_auc = res['auc_score']
 
     save_path = get_best_lid_path(net_type, dataset, adv_attack, id=id)
-    torch.save(best_detector, save_path)
+    torch.save(best_detector.get_save_dict(), save_path)
 
     plt.xlabel('FPR')
     plt.ylabel('TPR')
@@ -313,7 +331,8 @@ def load_lid(net_type, dataset, adv_attack, k, id=None):
     save_path = get_lid_path(net_type, dataset, adv_attack, k, id=id)
     if not save_path.exists():
         return None
-    return torch.load(save_path)
+    save_dict = torch.load(save_path)
+    return LIDDetector.load(save_dict)
 
 
 def get_best_lid_path(net_type, dataset, adv_attack, id=None):
@@ -327,7 +346,8 @@ def load_best_lid(net_type, dataset, adv_attack, id=None):
     save_path = get_best_lid_path(net_type, dataset, adv_attack, id=id)
     if not save_path.exists():
         return False
-    return torch.load(save_path)
+    save_dict = torch.load(save_path)
+    return LIDDetector.load(save_dict)
 
 
 if __name__ == '__main__':

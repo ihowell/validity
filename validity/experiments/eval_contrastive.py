@@ -49,7 +49,7 @@ def eval_contrastive_ds(contrastive_method,
                                                   adv_step=adv_step,
                                                   id=classifier_id)
 
-    cls = load_cls(cls_type, cls_weights_path, in_ds_name)
+    cls = load_cls(cls_weights_path)
     cls.cuda()
     if verbose:
         print(f'Evaluating on classifier:')
@@ -66,6 +66,7 @@ def eval_contrastive_ds(contrastive_method,
         print(f'Evaluating on {len(ood_detectors)} ood detectors:')
     ood_preds = {}
     for detector_name, detector in ood_detectors:
+        detector.cuda()
         preds = []
         for batch, _ in tqdm(loader, disable=not verbose):
             preds.append(detector.predict(batch.float()))
@@ -76,6 +77,7 @@ def eval_contrastive_ds(contrastive_method,
         print(f'Evaluating on {len(adv_detectors)} adv detectors')
     adv_preds = {}
     for detector_name, detector in adv_detectors:
+        detector.cuda()
         preds = []
         for batch, _ in tqdm(loader, disable=not verbose):
             preds.append(detector.predict(batch.type(torch.float)))

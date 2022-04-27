@@ -59,10 +59,12 @@ def train(net,
         raise Exception(f'No valid optimizer specified: {opt_name}')
 
     Path(save_path).parent.mkdir(exist_ok=True, parents=True)
-    early_stopping = EarlyStopping({
-        'args': net.get_args(),
-        'state_dict': net.state_dict()
-    }, save_path)
+    early_stopping = EarlyStopping(
+        {
+            'type': net.get_type(),
+            'args': net.get_args(),
+            'state_dict': net.state_dict()
+        }, save_path)
     tb_writer = None
     if tensorboard_path:
         tb_writer = SummaryWriter(tensorboard_path)

@@ -9,8 +9,6 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from tabulate import tabulate
 
-from torchvision import transforms, datasets
-from torch.utils.data import DataLoader
 from torch.autograd import Variable
 
 from sklearn.linear_model import LogisticRegressionCV
@@ -23,32 +21,55 @@ from validity.datasets import load_datasets
 
 class ODINDetector(nn.Module):
 
-    def __init__(self, network=None, noise_magnitude=None, temper=None):
+    @classmethod
+    def load(cls, saved_dict):
+        detector = cls(**saved_dict['args'])
+        detector.load_state_dict(saved_dict['state_dict'])
+        return detector
+
+    def __init__(self,
+                 classifier_path=None,
+                 noise_magnitude=None,
+                 temper=None,
+                 _lr=None,
+                 _sc=None):
         super().__init__()
-        self.network = network
-        self.criterion = nn.CrossEntropyLoss()
+        self.classifier_path = classifier_path
         self.noise_magnitude = noise_magnitude
         self.temper = temper
 
-        self.lr = None
-        self.sc = None
+        self.network = load_cls(classifier_path)
+        self.network.eval()
+        self.criterion = nn.CrossEntropyLoss()
+
+        self.lr = _lr
+        self.sc = _sc
+
+    def get_save_dict(self):
+        return {
+            'args': {
+                'classifier_path': self.classifier_path,
+                'noise_magnitude': self.noise_magnitude,
+                'temper': self.temper,
+                '_lr': self.lr,
+                '_sc': self.sc,
+            },
+            'state_dict': self.state_dict()
+        }
 
     def predict(self, inputs):
         assert self.lr is not None
-        with torch.cuda.amp.autocast():
-            score = self.score(inputs)
+        score = self.score(inputs)
         score = self.sc.transform(score)
         return -self.lr.predict(score) + 1.
 
     def predict_proba(self, inputs):
         assert self.lr is not None
-        with torch.cuda.amp.autocast():
-            score = self.score(inputs)
+        score = self.score(inputs)
         score = self.sc.transform(score)
         return -self.lr.predict_proba(score) + 1.
 
     def train(self, in_loader, out_loader):
-        self.network.eval()
         score_in = []
         for data, _ in tqdm(in_loader, desc='Test in loader'):
             score_in.append(self.score(data))
@@ -131,11 +152,7 @@ def train_odin(in_dataset,
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    network = load_cls(net_type, weights_path, in_dataset)
-    network = network.cuda()
-    network.eval()
-
-    odin = ODINDetector(network, magnitude, temperature)
+    odin = ODINDetector(weights_path, magnitude, temperature)
     odin = odin.cuda()
 
     _, in_test_ds = load_datasets(in_dataset)
@@ -147,7 +164,7 @@ def train_odin(in_dataset,
 
     save_path = get_odin_path(net_type, in_dataset, out_dataset, magnitude, temperature, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(odin, save_path)
+    torch.save(odin.get_save_dict(), save_path)
 
     save_name = f'odin_{net_type}_{in_dataset}_{out_dataset}_{magnitude}_{temperature}'
     if id:
@@ -212,7 +229,7 @@ def train_multiple_odin(in_dataset,
 
     save_path = get_best_odin_path(net_type, in_dataset, out_dataset, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(best_detector, save_path)
+    torch.save(best_detector.get_save_dict(), save_path)
 
     if latex_print:
         print(' & '.join(result_table[0]) + '\\\\')
@@ -265,7 +282,8 @@ def load_odin(net_type, in_dataset, out_dataset, magnitude, temperature, id=None
                               temperature,
                               id=None)
     assert save_path.exists(), f'{save_path} does not exist'
-    return torch.load(save_path)
+    save_dict = torch.load(save_path)
+    return ODINDetector.load(save_dict)
 
 
 def get_best_odin_path(net_type, in_dataset, out_dataset, id=None):
@@ -279,7 +297,8 @@ def load_best_odin(net_type, in_dataset, out_dataset, id=None):
     save_path = get_best_odin_path(net_type, in_dataset, out_dataset, id=id)
     if not save_path.exists():
         return False
-    return torch.load(save_path)
+    save_dict = torch.load(save_path)
+    return ODINDetector.load(save_dict)
 
 
 if __name__ == '__main__':

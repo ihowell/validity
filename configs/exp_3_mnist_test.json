@@ -12,44 +12,6 @@
             }
         },
         {
-            "name": "l2_reg",
-            "type": "mnist",
-            "train_kwargs": {
-                "l2_penalty": 1e-2,
-                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_l2_reg",
-                "max_epochs": 3
-            }
-        },
-        {
-            "name": "grad_norm_clip",
-            "type": "mnist",
-            "train_kwargs": {
-                "max_grad_norm": 1.0,
-                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_grad_norm_clip",
-                "max_epochs": 3
-            }
-        },
-        {
-            "name": "adv_train",
-            "type": "mnist",
-            "train_kwargs": {
-                "opt_name": "sgd",
-                "adv_steps": 7,
-                "adv_eps": 1e-1,
-                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_adv_train",
-                "max_epochs": 14
-            }
-        },
-        {
-            "name": "grad_penalty",
-            "type": "mnist",
-            "train_kwargs": {
-                "lipshitz_gp": 1e-1,
-                "max_epochs": 3,
-                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_grad_penalty"
-            }
-        },
-        {
             "name": "spectral_norm",
             "type": "mnist",
             "cls_kwargs": {

@@ -161,10 +161,20 @@ class PreActBottleneck(nn.Module):
 
 class ResNet(nn.Module):
 
-    def __init__(self, block, num_blocks, num_classes=10, in_channels=3, in_transform=None):
+    @classmethod
+    def load(cls, saved_dict):
+        (args, kwargs) = saved_dict['args']
+        model = cls(*args, **kwargs)
+        model.load_state_dict(saved_dict['state_dict'])
+        return model
+
+    def __init__(self, block_name, num_blocks, num_classes=10, in_channels=3):
         super(ResNet, self).__init__()
+        self.block_name = block_name
+        self.num_classes = num_classes
+        self.in_channels = in_channels
+        block = get_block_cls(block_name)
         self.in_planes = 64
-        self.in_transform = in_transform
 
         self.conv1 = conv3x3(in_channels, 64)
         self.bn1 = nn.BatchNorm2d(64)
@@ -173,6 +183,15 @@ class ResNet(nn.Module):
         self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
         self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
         self.linear = nn.Linear(512 * block.expansion, num_classes)
+
+    def get_type(self):
+        return 'resnet'
+
+    def get_args(self):
+        return ((self.block_name, self.num_blocks), {
+            'num_classes': self.num_classes,
+            'in_channels': self.in_channels
+        })
 
     def _make_layer(self, block, planes, num_blocks, stride):
         strides = [stride] + [1] * (num_blocks - 1)
@@ -183,8 +202,6 @@ class ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        if self.in_transform:
-            x = self.in_transform(x)
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
@@ -198,8 +215,6 @@ class ResNet(nn.Module):
     # function to extact the multiple features
     def feature_list(self, x):
         out_list = []
-        if self.in_transform:
-            x = self.in_transform(x)
         out = F.relu(self.bn1(self.conv1(x)))
         out_list.append(out)
         out = self.layer1(out)
@@ -217,8 +232,6 @@ class ResNet(nn.Module):
 
     # function to extact a specific feature
     def intermediate_forward(self, x, layer_index):
-        if self.in_transform:
-            x = self.in_transform(x)
         out = F.relu(self.bn1(self.conv1(x)))
         if layer_index == 1:
             out = self.layer1(out)
@@ -238,8 +251,6 @@ class ResNet(nn.Module):
 
     # function to extact the penultimate features
     def penultimate_forward(self, x):
-        if self.in_transform:
-            x = self.in_transform(x)
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
@@ -251,27 +262,35 @@ class ResNet(nn.Module):
         return y, penultimate
 
 
+def get_block_cls(block_name):
+    if block_name == 'pre_act':
+        return PreActBlock
+    elif block_name == 'basic':
+        return BasicBlock
+    elif block_name == 'bottleneck':
+        return Bottleneck
+    else:
+        raise Exception(f'Could not find block with name "{block_name}"')
+
+
 def ResNet18(num_c, in_ch):
-    return ResNet(PreActBlock, [2, 2, 2, 2], num_classes=num_c, in_channels=in_ch)
+    return ResNet('pre_act', [2, 2, 2, 2], num_classes=num_c, in_channels=in_ch)
 
 
-def ResNet34(num_c, in_ch, in_transform=None):
-    return ResNet(BasicBlock, [3, 4, 6, 3],
-                  num_classes=num_c,
-                  in_transform=in_transform,
-                  in_channels=in_ch)
+def ResNet34(num_c, in_ch):
+    return ResNet('basic', [3, 4, 6, 3], num_classes=num_c, in_channels=in_ch)
 
 
 def ResNet50(num_c, in_ch):
-    return ResNet(Bottleneck, [3, 4, 6, 3], num_classes=num_c, in_channels=in_ch)
+    return ResNet('bottleneck', [3, 4, 6, 3], num_classes=num_c, in_channels=in_ch)
 
 
 def ResNet101():
-    return ResNet(Bottleneck, [3, 4, 23, 3])
+    return ResNet('bottleneck', [3, 4, 23, 3])
 
 
 def ResNet152():
-    return ResNet(Bottleneck, [3, 8, 36, 3])
+    return ResNet('bottleneck', [3, 8, 36, 3])
 
 
 def test():

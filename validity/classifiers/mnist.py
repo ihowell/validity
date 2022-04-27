@@ -25,6 +25,9 @@ class MnistClassifier(nn.Module):
             self.conv2 = spectral_norm(self.conv2)
             self.dense = spectral_norm(self.dense)
 
+    def get_type(self):
+        return 'mnist'
+
     def get_args(self):
         return {'spectral_normalization': self.spectral_normalization}
 

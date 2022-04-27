@@ -81,7 +81,7 @@ def construct_dataset(dataset,
         elif dataset == 'cifar10':
             confidence = 7.439  # Average logit marginal in training set
 
-    network = load_cls(net_type, weights_location, dataset)
+    network = load_cls(weights_location)
     network.eval()
 
     if dataset == 'mnist':

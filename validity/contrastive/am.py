@@ -167,7 +167,6 @@ def am(generator,
 
 
 def run_am(dataset,
-           classifier_net_type,
            classifier_weights_path,
            generator_net_type,
            generator_weights_path,
@@ -183,7 +182,7 @@ def run_am(dataset,
     _, test_ds = load_datasets(dataset)
     loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False)
 
-    classifier = load_cls(classifier_net_type, classifier_weights_path, dataset)
+    classifier = load_cls(classifier_weights_path)
     classifier.eval()
 
     generator = load_gen(generator_net_type, generator_weights_path, dataset)

@@ -53,7 +53,7 @@ def activation_test(cls_type, cls_weights_path, in_ds_name, out_ds_name, adv_att
         adv_attacks = [adv_attacks]
 
     # ???, this seems aggressive
-    cls = load_cls(cls_type, cls_weights_path, in_ds_name)
+    cls = load_cls(cls_weights_path)
     cls = cls.cuda()
     cls.eval()
 
@@ -124,7 +124,7 @@ def activation_detector(cls_type, cls_weights_path, in_ds_name, out_ds_name, adv
     if isinstance(adv_attacks, str):
         adv_attacks = [adv_attacks]
 
-    cls = load_cls(cls_type, cls_weights_path, in_ds_name)
+    cls = load_cls(cls_weights_path)
     cls = cls.cuda()
     cls.eval()
 

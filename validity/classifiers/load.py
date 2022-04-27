@@ -2,7 +2,7 @@ from pathlib import Path
 
 import torch
 
-from .resnet import ResNet18, ResNet34, ResNet50
+from .resnet import ResNet, ResNet18, ResNet34, ResNet50
 #from .densenet import *
 from .mnist import MnistClassifier
 
@@ -39,11 +39,14 @@ def construct_cls(cls_type, dataset, cls_kwargs=None):
     return net
 
 
-def load_cls(cls_type, weights_path, dataset):
+def load_cls(weights_path):
     saved_dict = torch.load(weights_path)
+    cls_type = saved_dict['type']
+
     if cls_type == 'mnist':
         net = MnistClassifier.load(saved_dict)
+    elif cls_type == 'resnet':
+        net = ResNet.load(saved_dict)
     else:
-        net = construct_cls(cls_type, dataset)
-        net.load_state_dict(torch.load(weights_path))
+        raise Exception(f'Unknown classifier type: {cls_type}')
     return net

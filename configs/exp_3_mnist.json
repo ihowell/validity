@@ -14,6 +14,7 @@
             "name": "l2_reg",
             "type": "mnist",
             "train_kwargs": {
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_l2_reg",
                 "weight_decay": 1e-2
             }
         },
@@ -21,6 +22,7 @@
             "name": "grad_norm_clip",
             "type": "mnist",
             "train_kwargs": {
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_grad_norm_clip",
                 "max_grad_norm": 1.0
             }
         },
@@ -28,6 +30,7 @@
             "name": "adv_train",
             "type": "mnist",
             "train_kwargs": {
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_adv_train",
                 "opt_name": "sgd",
                 "adv_steps": 7,
                 "adv_eps": 1e-1
@@ -37,6 +40,7 @@
             "name": "grad_penalty",
             "type": "mnist",
             "train_kwargs": {
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_grad_penalty",
                 "lipshitz_gp": 1e-1
             }
         },
@@ -45,6 +49,9 @@
             "type": "mnist",
             "cls_kwargs": {
                 "spectral_normalization": true
+            },
+            "train_kwargs": {
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_spectral_norm"
             }
         }
     ],
@@ -76,7 +83,7 @@
     ],
     "contrastive_kwargs": {
         "shards": 40,
-        "batch_size": 16
+        "batch_size": 256
     },
     "contrastive_subset": 100
 }

@@ -144,7 +144,7 @@ def _make_contrastive_dataset_job(contrastive_type,
         encoded_iter = iter(encoded_test_loader)
 
     print('Loading classifier')
-    classifier = load_cls(classifier_net_type, classifier_weights_path, dataset)
+    classifier = load_cls(classifier_weights_path)
     classifier = classifier.cuda()
     classifier.eval()
 

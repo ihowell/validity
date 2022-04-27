@@ -510,7 +510,7 @@ def run_cdeepex(dataset,
     if dataset == 'mnist':
         num_classes = 10
 
-    classifier = load_cls(classifier_net_type, classifier_weights_path, dataset)
+    classifier = load_cls(classifier_weights_path)
     classifier.eval()
 
     generator = load_gen(generator_net_type, generator_weights_path, dataset)

@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import fire
 import torch
+import torch.nn as nn
 from tqdm import tqdm
-from torchvision import datasets, transforms
 
 from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
 from sklearn.neighbors import KernelDensity
@@ -20,9 +20,10 @@ from validity.datasets import load_datasets
 BANDWIDTHS = {'mnist': 1.20, 'cifar': 0.26, 'svhn': 1.00}
 
 
-class LikelihoodRatioDetector:
+class LikelihoodRatioDetector(nn.Module):
 
     def __init__(self, ll_est=None, bg_ll_est=None):
+        super().__init__()
         self.ll_est = ll_est
         self.bg_ll_est = bg_ll_est
         self.lr = None
