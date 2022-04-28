@@ -114,9 +114,13 @@ class LIDDetector(nn.Module):
         LID_noise = np.concatenate(LID_noise)
 
         # Create train/validation and test sets
-        LID_in_val, LID_in_test = LID_in[:500], LID_in[500:]
-        LID_out_val, LID_out_test = LID_out[:500], LID_out[500:]
-        LID_noise_val, LID_noise_test = LID_noise[:500], LID_noise[500:]
+        LID_in_val, LID_in_test = LID_in[:int(LID_in.shape[0] *
+                                              0.1)], LID_in[int(LID_in.shape[0] * 0.1):]
+        LID_out_val, LID_out_test = LID_out[:int(LID_out.shape[0] *
+                                                 0.1)], LID_out[int(LID_out.shape[0] * 0.1):]
+        LID_noise_val, LID_noise_test = LID_noise[:int(LID_noise.shape[0] * 0.1
+                                                       )], LID_noise[int(LID_noise.shape[0] *
+                                                                         0.1):]
 
         LID_val = np.concatenate([LID_in_val, LID_noise_val, LID_out_val])
         LID_test = np.concatenate([LID_in_test, LID_noise_test, LID_out_test])
