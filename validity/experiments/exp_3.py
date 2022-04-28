@@ -209,6 +209,7 @@ def run_experiment(cfg_file, high_performance=False):
         for cls_cfg in cfg['classifiers']:
             cls_type = cls_cfg['type']
             id = cls_cfg['name']
+            cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
             for adv_attack in cfg['adv_attacks']:
                 density_path = get_density_path(cls_type, in_dataset, adv_attack, id=id)
                 lid_path = get_best_lid_path(cls_type, in_dataset, adv_attack, id=id)
