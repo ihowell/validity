@@ -132,13 +132,14 @@ class MahalanobisDetector(nn.Module):
             Mahalanobis_noise = self.score_for_loader(noise_test_loader)
 
         # Create train/validation and test sets
+        val_size = int(Mahalanobis_in.shape[0] * 0.1)
         Mahalanobis_in_val, Mahalanobis_in_test = \
-            Mahalanobis_in[:500], Mahalanobis_in[500:]
+            Mahalanobis_in[:val_size], Mahalanobis_in[val_size:]
         Mahalanobis_out_val, Mahalanobis_out_test = \
-            Mahalanobis_out[:500], Mahalanobis_out[500:]
+            Mahalanobis_out[:val_size], Mahalanobis_out[val_size:]
         if noise_test_loader:
             Mahalanobis_noise_val, Mahalanobis_noise_test = \
-                Mahalanobis_noise[:500], Mahalanobis_noise[500:]
+                Mahalanobis_noise[:val_size], Mahalanobis_noise[val_size:]
 
         Mahalanobis_val = np.concatenate([Mahalanobis_in_val, Mahalanobis_out_val])
         Mahalanobis_test = np.concatenate([Mahalanobis_in_test, Mahalanobis_out_test])
