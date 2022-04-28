@@ -253,13 +253,13 @@ def run_experiment(cfg_file, high_performance=False):
             if not high_performance:
                 raise Exception(f'High-performance required to run to encode dataset.')
 
-            gen_path = get_gen_path(gen_cfg['type'], in_dataset, gen_cfg['kwargs'])
+            gen_path = get_gen_path(gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
             print('Running get_encode_dataset, ',
                   (gen_cfg['type'], gen_path, encode_path, in_dataset))
             gen_encode_dataset(gen_cfg['type'], gen_path, encode_path, in_dataset,
                                **gen_cfg.get('encode_kwargs', {}))
         else:
-            gen_path = get_gen_path(gen_cfg['type'], in_dataset, gen_cfg['kwargs'])
+            gen_path = get_gen_path(gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
             print('Found cached get_encode_dataset, ',
                   (gen_cfg['type'], gen_path, encode_path, in_dataset),
                   gen_cfg.get('encode_kwargs'))
