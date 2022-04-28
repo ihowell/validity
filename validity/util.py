@@ -13,7 +13,7 @@ def get_executor():
                                slurm_gres='gpu',
                                slurm_mem_per_cpu='16G',
                                slurm_array_parallelism=100,
-                               slurm_constraint='gpu_v100|gpu_t4')
+                               slurm_constraint='gpu_v100')
     return executor
 
 
