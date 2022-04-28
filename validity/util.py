@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import submitit
 import torch
@@ -25,18 +26,18 @@ def loop_gen(gen):
 
 class np_loader:
 
-    def __init__(self, ds, label_is_ones):
+    def __init__(self, ds, label_is_ones, batch_size=64):
         self.ds = ds
         self.label_is_ones = label_is_ones
+        self.batch_size = batch_size
 
     def __iter__(self):
         if self.label_is_ones:
-            label = np.ones(64)
+            label = np.ones(self.batch_size)
         else:
-            label = np.zeros(64)
-
-        for i in range(self.ds.shape[0] // 64):
-            batch = self.ds[i * 64:(i + 1) * 64]
+            label = np.zeros(self.batch_size)
+        for i in range(math.ceil(self.ds.shape[0] / self.batch_size)):
+            batch = self.ds[i * self.batch_size:(i + 1) * self.batch_size]
             yield torch.tensor(batch), torch.tensor(label)
 
 

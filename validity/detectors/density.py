@@ -1,17 +1,11 @@
-import json
-import copy
 import pathlib
-import pickle
 import multiprocessing as mp
-
-import matplotlib.pyplot as plt
 
 import numpy as np
 import fire
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-from torchvision import datasets, transforms
 
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
@@ -20,6 +14,7 @@ from sklearn.neighbors import KernelDensity
 from validity.adv_dataset import load_adv_dataset
 from validity.classifiers.load import load_cls
 from validity.datasets import load_datasets
+from validity.util import np_loader
 
 BANDWIDTHS = {'mnist': 1.20, 'cifar10': 0.26, 'svhn': 1.00}
 
@@ -142,7 +137,7 @@ class DensityDetector(nn.Module):
 
 
 def train_density_adv(dataset, net_type, weights_path, adv_attack, cuda_idx=0, id=None):
-    from validity.adv_dataset import load_adv_dataset
+    print(f'train_density_adv {locals()=}')
     torch.cuda.manual_seed(0)
     np.random.seed(0)
     torch.cuda.set_device(cuda_idx)
@@ -166,23 +161,6 @@ def train_density_adv(dataset, net_type, weights_path, adv_attack, cuda_idx=0, i
     adv_test_data = np.take(adv_data, test_idx, axis=0)
     noise_train_data = np.take(noise_data, train_idx, axis=0)
     noise_test_data = np.take(noise_data, test_idx, axis=0)
-
-    class np_loader:
-
-        def __init__(self, ds, label_is_ones, batch_size=64):
-            self.ds = ds
-            self.label_is_ones = label_is_ones
-            self.batch_size = batch_size
-
-        def __iter__(self):
-            if self.label_is_ones:
-                label = np.ones(self.batch_size)
-            else:
-                label = np.zeros(self.batch_size)
-
-            for i in range(self.ds.shape[0] // self.batch_size):
-                batch = self.ds[i * self.batch_size:(i + 1) * self.batch_size]
-                yield torch.tensor(batch), torch.tensor(label)
 
     detector = DensityDetector(classifier_path=weights_path,
                                num_labels=num_labels,

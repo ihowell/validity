@@ -375,8 +375,6 @@ def train_mahalanobis_adv(dataset,
                           cuda_idx=0,
                           magnitude=1e-2,
                           id=None):
-    from validity.classifiers.resnet import ResNet34
-    from validity.classifiers.mnist import MnistClassifier
     from validity.adv_dataset import load_adv_dataset
 
     torch.cuda.manual_seed(0)

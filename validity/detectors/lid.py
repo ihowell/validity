@@ -1,5 +1,4 @@
 import pathlib
-import random
 
 import torch
 import torch.nn as nn
@@ -10,7 +9,6 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from tabulate import tabulate
 
-from torchvision import transforms, datasets
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
 
