@@ -11,7 +11,7 @@ def get_executor():
                                cpus_per_task=4,
                                slurm_partition='gpu',
                                slurm_gres='gpu',
-                               slurm_mem_per_cpu=16,
+                               slurm_mem_per_cpu='16G',
                                slurm_array_parallelism=100,
                                slurm_constraint='gpu_v100|gpu_t4')
     return executor
