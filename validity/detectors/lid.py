@@ -19,6 +19,7 @@ from scipy.spatial.distance import cdist
 
 from validity.datasets import load_datasets
 from validity.classifiers.load import load_cls
+from validity.util import np_loader
 
 
 class LIDDetector(nn.Module):
@@ -216,22 +217,6 @@ def train_lid_adv(dataset,
     torch.cuda.set_device(cuda_idx)
 
     clean_data, adv_data, noisy_data = load_adv_dataset(dataset, adv_attack, net_type, id=id)
-
-    class np_loader:
-
-        def __init__(self, ds, label_is_ones):
-            self.ds = ds
-            self.label_is_ones = label_is_ones
-
-        def __iter__(self):
-            if self.label_is_ones:
-                label = np.ones(batch_size)
-            else:
-                label = np.zeros(batch_size)
-
-            for i in range(self.ds.shape[0] // batch_size):
-                batch = self.ds[i * batch_size:(i + 1) * batch_size]
-                yield torch.tensor(batch), torch.tensor(label)
 
     detector = LIDDetector(classifier_path=weights_path, k=k, dataset=dataset)
     detector.cuda()
