@@ -119,8 +119,9 @@ def run_experiment(cfg_file, high_performance=False):
         for gen_cfg in cfg['generators']:
             gen_path = get_gen_path(gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
 
-            jobs.append(cache_func(train_gen, gen_cfg['type'], in_dataset,
-                                   **gen_cfg['kwargs']))
+            jobs.append(
+                cache_func(gen_path, train_gen, gen_cfg['type'], in_dataset,
+                           **gen_cfg['kwargs']))
 
         jobs.append(cache_func(eval_vae_path, train_mnist_vae, beta=20., id='eval'))
         jobs.append(
