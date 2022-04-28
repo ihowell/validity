@@ -99,7 +99,7 @@ def gen_encode_dataset(gen_type, weights_path, encode_path, dataset, *args, **kw
         raise Exception(f'Unknown gen type passed to train_gen: {gen_type}')
 
 
-def run_sub_experiment(cfg_file, high_performance=False):
+def run_experiment(cfg_file, high_performance=False):
     with open(cfg_file) as f:
         cfg = json.load(f)
 
