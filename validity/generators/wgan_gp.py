@@ -288,11 +288,11 @@ def _encode_dataset_job(dataset,
     torch.cuda.manual_seed(seed)
 
     if dataset == 'mnist':
-        num_labels = 1
+        num_channels = 1
     else:
         raise Exception(f'Unknown dataset used for gan: {dataset}')
 
-    gan = WGAN_GP(num_labels=num_labels)
+    gan = WGAN_GP(num_channels=num_channels)
     gan.load_state_dict(torch.load(gan_path, map_location=f'cuda:{cuda_idx}'))
     gan = gan.cuda()
     gan.eval()
