@@ -28,20 +28,33 @@ from validity.util import get_executor
 from .eval_contrastive import eval_contrastive_ds, get_eval_res_path
 
 
-def c_func(path, func, *params, **kwargs):
-    if Path(path).exists():
-        print(f'Found cached {func.__name__}, {params}, {kwargs}')
-    else:
-        print(f'Running {func.__name__}, {params}, {kwargs}')
-        func(*params, **kwargs)
+def c_func(executor):
+
+    def thunk(path, func, *params, **kwargs):
+        if Path(path).exists():
+            print(f'Found cached {func.__name__}, {params}, {kwargs}')
+        else:
+            print(f'Running {func.__name__}, {params}, {kwargs}')
+            return executor.submit(func, *params, **kwargs)
+
+    return thunk
 
 
-def c_adv_dataset(dataset, adv_attack, net_type, cls_path, id=None):
-    if adv_dataset_exists(dataset, adv_attack, dataset, id=id):
-        print(f'Found cached adv dataset {dataset} {adv_attack} {net_type} {id}')
-    else:
-        print(f'Constructing adv dataset {dataset} {adv_attack} {net_type} {id}')
-        construct_adv_dataset(dataset, adv_attack, net_type, cls_path, id=id)
+def c_adv_dataset(executor):
+
+    def thunk(dataset, adv_attack, net_type, cls_path, id=None):
+        if adv_dataset_exists(dataset, adv_attack, dataset, id=id):
+            print(f'Found cached adv dataset {dataset} {adv_attack} {net_type} {id}')
+        else:
+            print(f'Constructing adv dataset {dataset} {adv_attack} {net_type} {id}')
+            return executor.submit(construct_adv_dataset,
+                                   dataset,
+                                   adv_attack,
+                                   net_type,
+                                   cls_path,
+                                   id=id)
+
+    return thunk
 
 
 def train_cls_func(cls_type,
@@ -86,137 +99,147 @@ def gen_encode_dataset(gen_type, weights_path, encode_path, dataset, *args, **kw
         raise Exception(f'Unknown gen type passed to train_gen: {gen_type}')
 
 
-def run_experiment(cfg_file, high_performance=False):
+def run_sub_experiment(cfg_file, high_performance=False):
     with open(cfg_file) as f:
         cfg = json.load(f)
 
-    if high_performance:
-        executor = get_executor()
-        job = executor.submit(make_generators, cfg)
-        job.results()
+    executor = get_executor()
+    cache_func = c_func(executor)
+    cache_adv_ds = c_adv_dataset(executor)
 
-        jobs = []
-        with executor.batch():
-            for cls_cfg in cfg['classifiers']:
-                jobs.append(
-                    executor.submit(run_sub_experiment, cfg, cls_cfg, high_performance=True))
-        [job.results() for job in jobs]
-    else:
-        make_generators(cfg)
-        for cls_cfg in cfg['classifiers']:
-            run_sub_experiment(cfg, cls_cfg, high_performance=False)
-
-
-def make_generators(cfg):
-    in_dataset = cfg['in_dataset']
-    eval_vae_path = get_mnist_vae_path(beta=20., id='eval')
-    eval_bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3, id='eval')
-
-    # Train generative functions
-    for gen_cfg in cfg['generators']:
-        gen_path = get_gen_path(gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
-        c_func(gen_path, train_gen, gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
-
-    c_func(eval_vae_path, train_mnist_vae, beta=20., id='eval')
-    c_func(eval_bg_vae_path, train_mnist_vae, beta=20., mutation_rate=0.3, id='eval')
-
-
-def run_sub_experiment(cfg, cls_cfg, high_performance=False):
     in_dataset = cfg['in_dataset']
     out_dataset = cfg['out_dataset']
 
     eval_vae_path = get_mnist_vae_path(beta=20., id='eval')
     eval_bg_vae_path = get_mnist_vae_path(beta=20., mutation_rate=0.3, id='eval')
 
+    # Train generative functions
+    jobs = []
+    with executor.batch():
+        for gen_cfg in cfg['generators']:
+            gen_path = get_gen_path(gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
+
+            jobs.append(cache_func(train_gen, gen_cfg['type'], in_dataset,
+                                   **gen_cfg['kwargs']))
+
+        jobs.append(cache_func(eval_vae_path, train_mnist_vae, beta=20., id='eval'))
+        jobs.append(
+            cache_func(eval_bg_vae_path,
+                       train_mnist_vae,
+                       beta=20.,
+                       mutation_rate=0.3,
+                       id='eval'))
+    [job.result() for job in jobs if job]
+
     # Train classifiers
-    for cls_cfg in cfg['classifiers']:
-        cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
-        c_func(cls_path,
-               train_cls_func,
-               cls_cfg['type'],
-               cls_path,
-               in_dataset,
-               64,
-               cls_kwargs=cls_cfg.get('cls_kwargs'),
-               train_kwargs=cls_cfg.get('train_kwargs'))
+    jobs = []
+    with executor.batch():
+        for cls_cfg in cfg['classifiers']:
+            cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
+            jobs.append(
+                cache_func(cls_path,
+                           train_cls_func,
+                           cls_cfg['type'],
+                           cls_path,
+                           in_dataset,
+                           64,
+                           cls_kwargs=cls_cfg.get('cls_kwargs'),
+                           train_kwargs=cls_cfg.get('train_kwargs')))
+    [job.result() for job in jobs if job]
 
     # Create adversarial datasets
-    for cls_cfg in cfg['classifiers']:
-        cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
-        for adv_attack in cfg['adv_attacks']:
-            c_adv_dataset(in_dataset,
-                          adv_attack,
-                          cls_cfg['type'],
-                          cls_path,
-                          id=cls_cfg['name'])
+    jobs = []
+    with executor.batch():
+        for cls_cfg in cfg['classifiers']:
+            cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
+            for adv_attack in cfg['adv_attacks']:
+                jobs.append(
+                    cache_adv_ds(in_dataset,
+                                 adv_attack,
+                                 cls_cfg['type'],
+                                 cls_path,
+                                 id=cls_cfg['name']))
+    [job.result() for job in jobs if job]
 
     # Train OOD detectors
-    for cls_cfg in cfg['classifiers']:
-        cls_type = cls_cfg['type']
-        id = cls_cfg['name']
-        cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
-        odin_path = get_best_odin_path(cls_type, in_dataset, out_dataset, id=id)
-        llr_path = get_llr_path(in_dataset, out_dataset, 0.3, id=id)
-        mahalanobis_ood_path = get_best_mahalanobis_ood_path(cls_type,
-                                                             in_dataset,
-                                                             out_dataset,
-                                                             id=id)
-        c_func(odin_path,
-               train_multiple_odin,
-               in_dataset,
-               out_dataset,
-               cls_type,
-               cls_path,
-               id=id)
-        c_func(llr_path,
-               train_llr_ood,
-               in_dataset,
-               out_dataset,
-               'mnist_vae',
-               eval_vae_path,
-               eval_bg_vae_path,
-               0.3,
-               id=id)
-        c_func(mahalanobis_ood_path,
-               train_multiple_mahalanobis_ood,
-               in_dataset,
-               out_dataset,
-               cls_type,
-               cls_path,
-               id=id)
+    jobs = []
+    with executor.batch():
+        for cls_cfg in cfg['classifiers']:
+            cls_type = cls_cfg['type']
+            id = cls_cfg['name']
+            cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
+            odin_path = get_best_odin_path(cls_type, in_dataset, out_dataset, id=id)
+            llr_path = get_llr_path(in_dataset, out_dataset, 0.3, id=id)
+            mahalanobis_ood_path = get_best_mahalanobis_ood_path(cls_type,
+                                                                 in_dataset,
+                                                                 out_dataset,
+                                                                 id=id)
+            jobs.append(
+                cache_func(odin_path,
+                           train_multiple_odin,
+                           in_dataset,
+                           out_dataset,
+                           cls_type,
+                           cls_path,
+                           id=id))
+            jobs.append(
+                cache_func(llr_path,
+                           train_llr_ood,
+                           in_dataset,
+                           out_dataset,
+                           'mnist_vae',
+                           eval_vae_path,
+                           eval_bg_vae_path,
+                           0.3,
+                           id=id))
+            jobs.append(
+                cache_func(mahalanobis_ood_path,
+                           train_multiple_mahalanobis_ood,
+                           in_dataset,
+                           out_dataset,
+                           cls_type,
+                           cls_path,
+                           id=id))
+    [job.result() for job in jobs if job]
 
     # Train ADV detectors
-    for cls_cfg in cfg['classifiers']:
-        cls_type = cls_cfg['type']
-        id = cls_cfg['name']
-        for adv_attack in cfg['adv_attacks']:
-            density_path = get_density_path(cls_type, in_dataset, adv_attack, id=id)
-            lid_path = get_best_lid_path(cls_type, in_dataset, adv_attack, id=id)
-            mahalanobis_adv_path = get_best_mahalanobis_adv_path(cls_type,
-                                                                 in_dataset,
-                                                                 adv_attack,
-                                                                 id=id)
-            c_func(density_path,
-                   train_density_adv,
-                   in_dataset,
-                   cls_type,
-                   cls_path,
-                   adv_attack,
-                   id=id)
-            c_func(lid_path,
-                   train_multiple_lid_adv,
-                   in_dataset,
-                   cls_type,
-                   cls_path,
-                   adv_attack,
-                   id=id)
-            c_func(mahalanobis_adv_path,
-                   train_multiple_mahalanobis_adv,
-                   in_dataset,
-                   cls_type,
-                   cls_path,
-                   adv_attack,
-                   id=id)
+    jobs = []
+    with executor.batch():
+        for cls_cfg in cfg['classifiers']:
+            cls_type = cls_cfg['type']
+            id = cls_cfg['name']
+            for adv_attack in cfg['adv_attacks']:
+                density_path = get_density_path(cls_type, in_dataset, adv_attack, id=id)
+                lid_path = get_best_lid_path(cls_type, in_dataset, adv_attack, id=id)
+                mahalanobis_adv_path = get_best_mahalanobis_adv_path(cls_type,
+                                                                     in_dataset,
+                                                                     adv_attack,
+                                                                     id=id)
+                jobs.append(
+                    cache_func(density_path,
+                               train_density_adv,
+                               in_dataset,
+                               cls_type,
+                               cls_path,
+                               adv_attack,
+                               id=id))
+                jobs.append(
+                    cache_func(lid_path,
+                               train_multiple_lid_adv,
+                               in_dataset,
+                               cls_type,
+                               cls_path,
+                               adv_attack,
+                               id=id))
+                jobs.append(
+                    cache_func(mahalanobis_adv_path,
+                               train_multiple_mahalanobis_adv,
+                               in_dataset,
+                               cls_type,
+                               cls_path,
+                               adv_attack,
+                               id=id))
+    [job.result() for job in jobs if job]
 
     # Encode datasets
     for gen_cfg in cfg['generators']:
