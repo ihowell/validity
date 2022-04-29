@@ -34,21 +34,22 @@ def make_contrastive_dataset(contrastive_type,
     assert contrastive_type in ['am', 'xgems', 'cdeepex']
 
     executor = get_executor()
-    jobs = submit_contrastive_dataset_jobs(executor,
-                                           contrastive_type,
-                                           dataset,
-                                           classifier_net_type,
-                                           classifier_weights_path,
-                                           generator_net_type,
-                                           generator_weights_path,
-                                           shards=shards,
-                                           batch_size=batch_size,
-                                           data_root=data_root,
-                                           cuda_idx=cuda_idx,
-                                           seed=seed,
-                                           classifier_id=classifier_id,
-                                           subset=subset,
-                                           **kwargs)
+    with executor.batch():
+        jobs = submit_contrastive_dataset_jobs(executor,
+                                               contrastive_type,
+                                               dataset,
+                                               classifier_net_type,
+                                               classifier_weights_path,
+                                               generator_net_type,
+                                               generator_weights_path,
+                                               shards=shards,
+                                               batch_size=batch_size,
+                                               data_root=data_root,
+                                               cuda_idx=cuda_idx,
+                                               seed=seed,
+                                               classifier_id=classifier_id,
+                                               subset=subset,
+                                               **kwargs)
     [job.results() for job in jobs]
 
     combine_contrastive_dataset_shards(contrastive_type,
@@ -112,34 +113,33 @@ def submit_contrastive_dataset_jobs(executor,
     assert contrastive_type in ['am', 'xgems', 'cdeepex']
 
     jobs = []
-    with executor.batch():
-        for shard_idx in range(shards):
-            shard_path = _get_contrastive_dataset_shard_path(contrastive_type,
-                                                             dataset,
-                                                             classifier_net_type,
-                                                             generator_net_type,
-                                                             subset,
-                                                             shard_idx,
-                                                             shards,
-                                                             classifier_id=classifier_id)
-            if not Path(shard_path).exists():
-                jobs.append(
-                    executor.submit(_make_contrastive_dataset_job,
-                                    contrastive_type,
-                                    dataset,
-                                    classifier_net_type,
-                                    classifier_weights_path,
-                                    generator_net_type,
-                                    generator_weights_path,
-                                    shard_idx,
-                                    shards,
-                                    batch_size=batch_size,
-                                    data_root=data_root,
-                                    cuda_idx=cuda_idx,
-                                    seed=seed,
-                                    subset=subset,
-                                    classifier_id=classifier_id,
-                                    **kwargs))
+    for shard_idx in range(shards):
+        shard_path = _get_contrastive_dataset_shard_path(contrastive_type,
+                                                         dataset,
+                                                         classifier_net_type,
+                                                         generator_net_type,
+                                                         subset,
+                                                         shard_idx,
+                                                         shards,
+                                                         classifier_id=classifier_id)
+        if not Path(shard_path).exists():
+            jobs.append(
+                executor.submit(_make_contrastive_dataset_job,
+                                contrastive_type,
+                                dataset,
+                                classifier_net_type,
+                                classifier_weights_path,
+                                generator_net_type,
+                                generator_weights_path,
+                                shard_idx,
+                                shards,
+                                batch_size=batch_size,
+                                data_root=data_root,
+                                cuda_idx=cuda_idx,
+                                seed=seed,
+                                subset=subset,
+                                classifier_id=classifier_id,
+                                **kwargs))
     return jobs
 
 
