@@ -22,7 +22,7 @@ from validity.generators.mnist_vae import train as train_mnist_vae, \
     get_save_path as get_mnist_vae_path, encode_dataset as mnist_vae_encode_dataset
 from validity.generators.wgan_gp import train as train_wgan_gp, get_save_path as get_wgan_gp_path, \
     encode_dataset as wgan_gp_encode_dataset
-from validity.contrastive.dataset import make_contrastive_dataset
+from validity.contrastive.dataset import submit_contrastive_dataset_jobs, combine_contrastive_dataset_shards
 from validity.util import get_executor
 
 from .eval_contrastive import eval_contrastive_ds, get_eval_res_path
@@ -265,6 +265,60 @@ def run_experiment(cfg_file, high_performance=False):
                   gen_cfg.get('encode_kwargs'))
 
     # Create contrastive examples
+    jobs = []
+    with executor.batch():
+        for cls_cfg in cfg['classifiers']:
+            cls_type = cls_cfg['type']
+            id = cls_cfg['name']
+            cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
+            for contrastive_method in cfg['contrastive_methods']:
+                for gen_cfg in cfg['generators']:
+                    gen_path = get_gen_path(gen_cfg['type'], in_dataset, **gen_cfg['kwargs'])
+                    contrastive_path = get_contrastive_dataset_path(
+                        contrastive_method,
+                        in_dataset,
+                        cls_type,
+                        gen_cfg['type'],
+                        classifier_id=id,
+                        subset=cfg['contrastive_subset'])
+
+                    if not contrastive_path.exists():
+                        if not high_performance:
+                            raise Exception(
+                                f'Could not find contrastive dataset for method {contrastive_method} with generator {gen_cfg["type"]} at {contrastive_path}. Please run this expeirment in a high-performance setting and set high_performance=True.'
+                            )
+                        print(
+                            'Running submit_contrastive_dataset_jobs, ',
+                            (contrastive_method, in_dataset, cls_type, cls_path,
+                             gen_cfg['type'], gen_path), {
+                                 'classifier_id': id,
+                                 'subset': cfg['contrastive_subset'],
+                                 **cfg.get('contrastive_kwargs', {})
+                             })
+                        jobs.extend(
+                            submit_contrastive_dataset_jobs(executor,
+                                                            contrastive_method,
+                                                            in_dataset,
+                                                            cls_type,
+                                                            cls_path,
+                                                            gen_cfg['type'],
+                                                            gen_path,
+                                                            classifier_id=id,
+                                                            subset=cfg['contrastive_subset'],
+                                                            **cfg.get(
+                                                                'contrastive_kwargs', {})))
+                    else:
+                        print(
+                            'Found cached contrastive dataset, ',
+                            (contrastive_method, in_dataset, cls_type, cls_path,
+                             gen_cfg['type'], gen_path), {
+                                 'classifier_id': id,
+                                 'subset': cfg['contrastive_subset'],
+                                 **cfg.get('contrastive_kwargs', {})
+                             })
+    [job.results() for job in jobs if job]
+
+    # Commbine contrastive dataset shards
     for cls_cfg in cfg['classifiers']:
         cls_type = cls_cfg['type']
         id = cls_cfg['name']
@@ -286,31 +340,19 @@ def run_experiment(cfg_file, high_performance=False):
                             f'Could not find contrastive dataset for method {contrastive_method} with generator {gen_cfg["type"]} at {contrastive_path}. Please run this expeirment in a high-performance setting and set high_performance=True.'
                         )
                     print(
-                        'Running make_contrastive_dataset, ',
+                        'Combining contrastive dataset shards, ',
                         (contrastive_method, in_dataset, cls_type, cls_path, gen_cfg['type'],
                          gen_path), {
                              'classifier_id': id,
                              'subset': cfg['contrastive_subset'],
                              **cfg.get('contrastive_kwargs', {})
                          })
-                    make_contrastive_dataset(contrastive_method,
-                                             in_dataset,
-                                             cls_type,
-                                             cls_path,
-                                             gen_cfg['type'],
-                                             gen_path,
-                                             classifier_id=id,
-                                             subset=cfg['contrastive_subset'],
-                                             **cfg.get('contrastive_kwargs', {}))
-                else:
-                    print(
-                        'Found cached make_contrastive_dataset, ',
-                        (contrastive_method, in_dataset, cls_type, cls_path, gen_cfg['type'],
-                         gen_path), {
-                             'classifier_id': id,
-                             'subset': cfg['contrastive_subset'],
-                             **cfg.get('contrastive_kwargs', {})
-                         })
+                    combine_contrastive_dataset_shards(contrastive_method,
+                                                       in_dataset,
+                                                       cls_type,
+                                                       gen_cfg['type'],
+                                                       classifier_id=id,
+                                                       **cfg.get('contrastive_kwargs'))
 
     # Evaluate contrastive examples
     for cls_cfg in cfg['classifiers']:

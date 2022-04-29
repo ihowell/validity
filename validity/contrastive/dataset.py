@@ -34,6 +34,83 @@ def make_contrastive_dataset(contrastive_type,
     assert contrastive_type in ['am', 'xgems', 'cdeepex']
 
     executor = get_executor()
+    jobs = submit_contrastive_dataset_jobs(executor,
+                                           contrastive_type,
+                                           dataset,
+                                           classifier_net_type,
+                                           classifier_weights_path,
+                                           generator_net_type,
+                                           generator_weights_path,
+                                           shards=shards,
+                                           batch_size=batch_size,
+                                           data_root=data_root,
+                                           cuda_idx=cuda_idx,
+                                           seed=seed,
+                                           classifier_id=classifier_id,
+                                           subset=subset,
+                                           **kwargs)
+    [job.results() for job in jobs]
+
+    combine_contrastive_dataset_shards(contrastive_type,
+                                       dataset,
+                                       classifier_net_type,
+                                       generator_net_type,
+                                       shards=shards,
+                                       classifier_id=classifier_id,
+                                       subset=subset)
+
+
+def combine_contrastive_dataset_shards(contrastive_type,
+                                       dataset,
+                                       classifier_net_type,
+                                       generator_net_type,
+                                       shards=20,
+                                       classifier_id=None,
+                                       subset=None):
+    examples = []
+    example_labels = []
+    for i in range(shards):
+        shard_path = _get_contrastive_dataset_shard_path(contrastive_type,
+                                                         dataset,
+                                                         classifier_net_type,
+                                                         generator_net_type,
+                                                         subset,
+                                                         i,
+                                                         shards,
+                                                         classifier_id=classifier_id)
+        _file = np.load(shard_path)
+        examples.append(_file['arr_0'])
+        example_labels.append(_file['arr_1'])
+    examples = np.concatenate(examples)
+    example_labels = np.concatenate(example_labels)
+
+    save_path = get_contrastive_dataset_path(contrastive_type,
+                                             dataset,
+                                             classifier_net_type,
+                                             generator_net_type,
+                                             subset=subset,
+                                             classifier_id=classifier_id)
+    Path(save_path).parent.mkdir(exist_ok=True)
+    np.savez(str(save_path), examples, example_labels)
+
+
+def submit_contrastive_dataset_jobs(executor,
+                                    contrastive_type,
+                                    dataset,
+                                    classifier_net_type,
+                                    classifier_weights_path,
+                                    generator_net_type,
+                                    generator_weights_path,
+                                    shards=20,
+                                    batch_size=1,
+                                    data_root='./datasets/',
+                                    cuda_idx=0,
+                                    seed=0,
+                                    classifier_id=None,
+                                    subset=None,
+                                    **kwargs):
+    assert contrastive_type in ['am', 'xgems', 'cdeepex']
+
     jobs = []
     with executor.batch():
         for shard_idx in range(shards):
@@ -63,33 +140,7 @@ def make_contrastive_dataset(contrastive_type,
                                     subset=subset,
                                     classifier_id=classifier_id,
                                     **kwargs))
-    [job.results() for job in jobs]
-
-    examples = []
-    example_labels = []
-    for i in range(shards):
-        shard_path = _get_contrastive_dataset_shard_path(contrastive_type,
-                                                         dataset,
-                                                         classifier_net_type,
-                                                         generator_net_type,
-                                                         subset,
-                                                         i,
-                                                         shards,
-                                                         classifier_id=classifier_id)
-        _file = np.load(shard_path)
-        examples.append(_file['arr_0'])
-        example_labels.append(_file['arr_1'])
-    examples = np.concatenate(examples)
-    example_labels = np.concatenate(example_labels)
-
-    save_path = get_contrastive_dataset_path(contrastive_type,
-                                             dataset,
-                                             classifier_net_type,
-                                             generator_net_type,
-                                             subset=subset,
-                                             classifier_id=classifier_id)
-    Path(save_path).parent.mkdir(exist_ok=True)
-    np.savez(str(save_path), examples, example_labels)
+    return jobs
 
 
 def _make_contrastive_dataset_job(contrastive_type,
