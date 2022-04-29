@@ -82,7 +82,7 @@
         "cdeepex"
     ],
     "contrastive_kwargs": {
-        "shards": 40,
+        "shards": 30,
         "batch_size": 256
     },
     "contrastive_subset": 100
