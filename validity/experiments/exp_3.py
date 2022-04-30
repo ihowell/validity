@@ -174,7 +174,7 @@ def run_experiment(cfg_file, high_performance=False):
             mahalanobis_ood_path = get_best_mahalanobis_ood_path(cls_type,
                                                                  in_dataset,
                                                                  out_dataset,
-                                                                 id=id)
+                                                                 classifier_id=id)
             jobs.append(
                 cache_func(odin_path,
                            train_multiple_odin,
@@ -216,7 +216,7 @@ def run_experiment(cfg_file, high_performance=False):
                 mahalanobis_adv_path = get_best_mahalanobis_adv_path(cls_type,
                                                                      in_dataset,
                                                                      adv_attack,
-                                                                     id=id)
+                                                                     classifier_id=id)
                 jobs.append(
                     cache_func(density_path,
                                train_density_adv,

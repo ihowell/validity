@@ -1,4 +1,5 @@
 import pathlib
+from pkgutil import get_data
 
 import torch
 import torch.nn as nn
@@ -16,7 +17,7 @@ from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, rec
 from sklearn.preprocessing import StandardScaler
 
 from validity.classifiers.load import load_cls
-from validity.datasets import load_datasets
+from validity.datasets import load_datasets, load_detector_datasets, get_dataset_info
 from validity.util import np_loader
 
 
@@ -104,32 +105,21 @@ class MahalanobisDetector(nn.Module):
         self.num_outputs = len(temp_list)
         self.feature_list = np.array([t.shape[1] for t in temp_list])
 
-    def train(self, in_train_loader):
-        # Set classifier to evaluation mode
+    def validate(self, in_loader, out_loader, noise_loader=None):
         self.classifier.eval()
 
         if self.num_outputs is None:
-            self.set_num_outputs(next(iter(in_train_loader))[0])
-
-        # Compute sample mean and precision
-        print('Calculating sample statistics')
-        self.sample_estimator(in_train_loader)
-
-    def evaluate(self, in_test_loader, out_test_loader, noise_test_loader=None):
-        self.classifier.eval()
-
-        if self.num_outputs is None:
-            self.set_num_outputs(next(iter(in_test_loader))[0])
+            self.set_num_outputs(next(iter(in_loader))[0])
 
         # Compute Mahalanobis scores for in and out distributions
         print('Computing Mahalanobis distances')
         print('Scoring in dataset')
-        Mahalanobis_in = self.score_for_loader(in_test_loader)
+        Mahalanobis_in = self.score_for_loader(in_loader)
         print('Scoring out of dataset')
-        Mahalanobis_out = self.score_for_loader(out_test_loader)
-        if noise_test_loader:
+        Mahalanobis_out = self.score_for_loader(out_loader)
+        if noise_loader:
             print('Scoring noise')
-            Mahalanobis_noise = self.score_for_loader(noise_test_loader)
+            Mahalanobis_noise = self.score_for_loader(noise_loader)
 
         # Create train/validation and test sets
         val_size = int(Mahalanobis_in.shape[0] * 0.1)
@@ -137,7 +127,7 @@ class MahalanobisDetector(nn.Module):
             Mahalanobis_in[:val_size], Mahalanobis_in[val_size:]
         Mahalanobis_out_val, Mahalanobis_out_test = \
             Mahalanobis_out[:val_size], Mahalanobis_out[val_size:]
-        if noise_test_loader:
+        if noise_loader:
             Mahalanobis_noise_val, Mahalanobis_noise_test = \
                 Mahalanobis_noise[:val_size], Mahalanobis_noise[val_size:]
 
@@ -149,7 +139,7 @@ class MahalanobisDetector(nn.Module):
         labels_test = np.concatenate(
             [np.ones(Mahalanobis_in_test.shape[0]),
              np.zeros(Mahalanobis_out_test.shape[0])])
-        if noise_test_loader:
+        if noise_loader:
             Mahalanobis_val = np.concatenate([Mahalanobis_val, Mahalanobis_noise_val])
             Mahalanobis_test = np.concatenate([Mahalanobis_test, Mahalanobis_noise_test])
             labels_val = np.concatenate([labels_val, np.ones(Mahalanobis_noise_val.shape[0])])
@@ -241,6 +231,13 @@ class MahalanobisDetector(nn.Module):
         return noise_gaussian_score.cpu().numpy()
 
     def sample_estimator(self, in_train_loader):
+        """
+        The estimates of mean and precision are generated using the same dataset that trained the classifier
+        """
+        self.classifier.eval()
+        if self.num_outputs is None:
+            self.set_num_outputs(next(iter(in_train_loader))[0])
+
         group_lasso = EmpiricalCovariance(assume_centered=False)
         correct, total = 0, 0
         num_sample_per_class = np.empty(self.num_classes)
@@ -321,37 +318,39 @@ def train_mahalanobis_ood(in_dataset,
                           data_root='./datasets/',
                           cuda_idx=0,
                           magnitude=1e-2,
-                          id=None):
+                          classifier_id=None):
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    if in_dataset == 'mnist':
-        num_labels = 10
-    elif in_dataset == 'cifar10':
-        num_labels = 10
+    ds_info = get_dataset_info(in_dataset)
 
     detector = MahalanobisDetector(classifier_path=weights_path,
-                                   num_classes=num_labels,
+                                   num_classes=ds_info.num_labels,
                                    noise_magnitude=magnitude)
 
-    in_train_ds, in_test_ds = load_datasets(in_dataset, data_root=data_root)
-    in_train_loader = torch.utils.data.DataLoader(in_train_ds, batch_size=64, shuffle=True)
+    cls_train_ds, _, in_val_ds, in_test_ds = load_detector_datasets(in_dataset,
+                                                                    data_root=data_root)
+    cls_train_loader = torch.utils.data.DataLoader(cls_train_ds, batch_size=64, shuffle=True)
 
-    detector.train(in_train_loader)
+    print('Calculating sample statistics')
+    detector.sample_estimator(cls_train_loader)
 
-    in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)
+    in_val_loader = torch.utils.data.DataLoader(in_val_ds, batch_size=64, shuffle=True)
+    _, _, out_val_ds, _ = load_detector_datasets(out_dataset)
+    out_val_loader = torch.utils.data.DataLoader(out_val_ds, batch_size=64, shuffle=True)
+    results = detector.evaluate(in_val_loader, out_val_loader)
 
-    _, out_test_ds = load_datasets(out_dataset)
-    out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=64, shuffle=True)
-    results = detector.evaluate(in_test_loader, out_test_loader)
-
-    save_path = get_mahalanobis_ood_path(net_type, in_dataset, out_dataset, magnitude, id=id)
+    save_path = get_mahalanobis_ood_path(net_type,
+                                         in_dataset,
+                                         out_dataset,
+                                         magnitude,
+                                         classifier_id=classifier_id)
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(detector.get_save_dict(), save_path)
 
     res_save_path = f'mahalanobis_{net_type}_{in_dataset}_{out_dataset}_{magnitude}'
-    if id:
-        res_save_path = f'{res_save_path}_{id}'
+    if classifier_id:
+        res_save_path = f'{res_save_path}_{classifier_id}'
     res_save_path = pathlib.Path('ood') / f'{res_save_path}_res.pt'
     torch.save(results, res_save_path)
 
@@ -372,46 +371,50 @@ def train_mahalanobis_adv(dataset,
                           net_type,
                           weights_path,
                           adv_attack,
-                          data_root='./datasets',
                           cuda_idx=0,
                           magnitude=1e-2,
                           batch_size=64,
-                          id=None):
+                          classifier_id=None):
     from validity.adv_dataset import load_adv_dataset
 
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    if dataset == 'mnist':
-        num_labels = 10
-    elif dataset == 'cifar10':
-        num_labels = 10
+    ds_info = get_dataset_info(dataset)
 
-    clean_data, adv_data, noisy_data = load_adv_dataset(dataset, adv_attack, net_type, id=id)
+    clean_data, adv_data, noisy_data = load_adv_dataset(dataset,
+                                                        adv_attack,
+                                                        net_type,
+                                                        classifier_id=classifier_id)
 
     detector = MahalanobisDetector(classifier_path=weights_path,
-                                   num_classes=num_labels,
+                                   num_classes=ds_info.num_labels,
                                    noise_magnitude=magnitude)
 
-    train_ds, _ = load_datasets(dataset)
-    in_train_loader = torch.utils.data.DataLoader(train_ds,
-                                                  batch_size=batch_size,
-                                                  shuffle=False)
+    cls_train_ds, _ = load_datasets(dataset)
+    cls_train_loader = torch.utils.data.DataLoader(cls_train_ds,
+                                                   batch_size=batch_size,
+                                                   shuffle=False)
 
-    detector.train(in_train_loader)
+    print('Calculating sample statistics')
+    detector.sample_estimator(cls_train_loader)
 
     in_test_loader = np_loader(clean_data, True)
     out_test_loader = np_loader(adv_data, False)
     noise_test_loader = np_loader(noisy_data, True)
     results = detector.evaluate(in_test_loader, out_test_loader, noise_test_loader)
 
-    save_path = get_mahalanobis_adv_path(net_type, dataset, adv_attack, magnitude, id=id)
+    save_path = get_mahalanobis_adv_path(net_type,
+                                         dataset,
+                                         adv_attack,
+                                         magnitude,
+                                         classifier_id=classifier_id)
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(detector.get_save_dict(), save_path)
 
     res_save_path = f'mahalanobis_{net_type}_{dataset}_{adv_attack}_{magnitude}'
-    if id:
-        res_save_path = f'{res_save_path}_{id}'
+    if classifier_id:
+        res_save_path = f'{res_save_path}_{classifier_id}'
     res_save_path = pathlib.Path('adv') / f'{res_save_path}_res.pt'
     torch.save(results, res_save_path)
 
@@ -435,7 +438,7 @@ def train_multiple_mahalanobis_ood(in_dataset,
                                    data_root='./datasets/',
                                    cuda_idx=0,
                                    latex_print=False,
-                                   id=None):
+                                   classifier_id=None):
     magnitudes = [0, 0.0005, 0.001, 0.0014, 0.002, 0.0024, 0.005, 0.01, 0.05, 0.1, 0.2]
     result_table = [['Magnitude', 'AUC Score', 'FPR at TPR=0.95']]
 
@@ -450,7 +453,7 @@ def train_multiple_mahalanobis_ood(in_dataset,
                                               data_root,
                                               cuda_idx,
                                               magnitude,
-                                              id=id)
+                                              classifier_id=classifier_id)
         fpr, tpr = res['plot']
         plt.plot(fpr, tpr, label=str(magnitude))
         row = [magnitude, res['auc_score'], res['fpr_at_tpr_95']]
@@ -464,15 +467,18 @@ def train_multiple_mahalanobis_ood(in_dataset,
             best_auc = res['auc_score']
 
     img_path = 'mahalanobis_ood'
-    if id:
-        img_path += f'_{id}'
+    if classifier_id:
+        img_path += f'_{classifier_id}'
     img_path = f'ood/{img_path}_results.png'
     plt.xlabel('FPR')
     plt.ylabel('TPR')
     plt.legend()
     plt.savefig(img_path)
 
-    save_path = get_best_mahalanobis_ood_path(net_type, in_dataset, out_dataset, id=id)
+    save_path = get_best_mahalanobis_ood_path(net_type,
+                                              in_dataset,
+                                              out_dataset,
+                                              classifier_id=classifier_id)
     torch.save(best_detector.get_save_dict(), save_path)
 
     if latex_print:
@@ -493,7 +499,7 @@ def train_multiple_mahalanobis_adv(dataset,
                                    data_root='./datasets/',
                                    cuda_idx=0,
                                    latex_print=False,
-                                   id=None):
+                                   classifier_id=None):
     magnitudes = [0, 0.0005, 0.001, 0.0014, 0.002, 0.0028, 0.005, 0.01]
     result_table = [['Magnitude', 'AUC Score', 'FPR at TPR=0.95']]
 
@@ -508,7 +514,7 @@ def train_multiple_mahalanobis_adv(dataset,
                                               data_root=data_root,
                                               cuda_idx=cuda_idx,
                                               magnitude=magnitude,
-                                              id=id)
+                                              classifier_id=classifier_id)
         fpr, tpr = res['plot']
         plt.plot(fpr, tpr, label=str(magnitude))
         row = [magnitude, res['auc_score'], res['fpr_at_tpr_95']]
@@ -521,7 +527,10 @@ def train_multiple_mahalanobis_adv(dataset,
             best_detector = detector
             best_auc = res['auc_score']
 
-    save_path = get_best_mahalanobis_adv_path(net_type, dataset, adv_attack, id=id)
+    save_path = get_best_mahalanobis_adv_path(net_type,
+                                              dataset,
+                                              adv_attack,
+                                              classifier_id=classifier_id)
     torch.save(best_detector.get_save_dict(), save_path)
 
     plt.xlabel('FPR')
@@ -540,8 +549,11 @@ def train_multiple_mahalanobis_adv(dataset,
         print(tabulate(result_table))
 
 
-def evaluate_best_mahalanobis_ood(net_type, in_dataset, out_dataset, id=None):
-    detector = load_best_mahalanobis_ood(net_type, in_dataset, out_dataset, id=id)
+def evaluate_best_mahalanobis_ood(net_type, in_dataset, out_dataset, classifier_id=None):
+    detector = load_best_mahalanobis_ood(net_type,
+                                         in_dataset,
+                                         out_dataset,
+                                         classifier_id=classifier_id)
     detector.eval()
 
     _, in_test_ds = load_datasets(in_dataset)
@@ -563,60 +575,74 @@ def evaluate_best_mahalanobis_ood(net_type, in_dataset, out_dataset, id=None):
     print(f'Accuracy: {acc:.4f}')
 
 
-def get_mahalanobis_ood_path(net_type, in_dataset, out_dataset, magnitude, id=None):
+def get_mahalanobis_ood_path(net_type, in_dataset, out_dataset, magnitude, classifier_id=None):
     save_path = f'mahalanobis_{net_type}_{in_dataset}_{out_dataset}_{magnitude}'
-    if id:
-        save_path = f'{save_path}_{id}'
+    if classifier_id:
+        save_path = f'{save_path}_{classifier_id}'
     return pathlib.Path('ood') / f'{save_path}.pt'
 
 
-def get_best_mahalanobis_ood_path(net_type, in_dataset, out_dataset, id=None):
+def get_best_mahalanobis_ood_path(net_type, in_dataset, out_dataset, classifier_id=None):
     save_path = f'mahalanobis_{net_type}_{in_dataset}_{out_dataset}'
-    if id:
-        save_path = f'{save_path}_{id}'
+    if classifier_id:
+        save_path = f'{save_path}_{classifier_id}'
     return pathlib.Path('ood') / f'{save_path}_best.pt'
 
 
-def get_mahalanobis_adv_path(net_type, dataset, adv_attack, magnitude, id=None):
+def get_mahalanobis_adv_path(net_type, dataset, adv_attack, magnitude, classifier_id=None):
     save_path = f'mahalanobis_{net_type}_{dataset}_{adv_attack}_{magnitude}'
-    if id:
-        save_path = f'{save_path}_{id}'
+    if classifier_id:
+        save_path = f'{save_path}_{classifier_id}'
     return pathlib.Path('adv') / f'{save_path}.pt'
 
 
-def get_best_mahalanobis_adv_path(net_type, dataset, adv_attack, id=None):
+def get_best_mahalanobis_adv_path(net_type, dataset, adv_attack, classifier_id=None):
     save_path = f'mahalanobis_{net_type}_{dataset}_{adv_attack}'
-    if id:
-        save_path = f'{save_path}_{id}'
+    if classifier_id:
+        save_path = f'{save_path}_{classifier_id}'
     return pathlib.Path('adv') / f'{save_path}_best.pt'
 
 
-def load_mahalanobis_ood(net_type, in_dataset, out_dataset, magnitude, id=None):
-    save_path = get_mahalanobis_ood_path(net_type, in_dataset, out_dataset, magnitude, id=id)
+def load_mahalanobis_ood(net_type, in_dataset, out_dataset, magnitude, classifier_id=None):
+    save_path = get_mahalanobis_ood_path(net_type,
+                                         in_dataset,
+                                         out_dataset,
+                                         magnitude,
+                                         classifier_id=classifier_id)
     if not save_path.exists():
         return False
     save_dict = torch.load(save_path)
     return MahalanobisDetector.load(save_dict)
 
 
-def load_best_mahalanobis_ood(net_type, in_dataset, out_dataset, id=None):
-    save_path = get_best_mahalanobis_ood_path(net_type, in_dataset, out_dataset, id=id)
+def load_best_mahalanobis_ood(net_type, in_dataset, out_dataset, classifier_id=None):
+    save_path = get_best_mahalanobis_ood_path(net_type,
+                                              in_dataset,
+                                              out_dataset,
+                                              classifier_id=classifier_id)
     if not save_path.exists():
         return False
     save_dict = torch.load(save_path)
     return MahalanobisDetector.load(save_dict)
 
 
-def load_mahalanobis_adv(net_type, dataset, adv_attack, magnitude, id=None):
-    save_path = get_mahalanobis_adv_path(net_type, dataset, adv_attack, magnitude, id=id)
+def load_mahalanobis_adv(net_type, dataset, adv_attack, magnitude, classifier_id=None):
+    save_path = get_mahalanobis_adv_path(net_type,
+                                         dataset,
+                                         adv_attack,
+                                         magnitude,
+                                         classifier_id=classifier_id)
     if not save_path.exists():
         return False
     save_dict = torch.load(save_path)
     return MahalanobisDetector.load(save_dict)
 
 
-def load_best_mahalanobis_adv(net_type, dataset, adv_attack, id=None):
-    save_path = get_best_mahalanobis_adv_path(net_type, dataset, adv_attack, id=id)
+def load_best_mahalanobis_adv(net_type, dataset, adv_attack, classifier_id=None):
+    save_path = get_best_mahalanobis_adv_path(net_type,
+                                              dataset,
+                                              adv_attack,
+                                              classifier_id=classifier_id)
     if not save_path.exists():
         return False
     save_dict = torch.load(save_path)

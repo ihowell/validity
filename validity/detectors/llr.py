@@ -1,9 +1,4 @@
-import json
-import copy
 import pathlib
-import pickle
-
-import matplotlib.pyplot as plt
 
 import numpy as np
 import fire
@@ -15,17 +10,34 @@ from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, rec
 from sklearn.linear_model import LogisticRegressionCV
 
 from validity.datasets import load_datasets
-
-BANDWIDTHS = {'mnist': 1.20, 'cifar': 0.26, 'svhn': 1.00}
+from validity.generators.load import load_gen
 
 
 class LikelihoodRatioDetector(nn.Module):
 
-    def __init__(self, ll_est=None, bg_ll_est=None):
+    @classmethod
+    def load(cls, saved_dict):
+        llr = cls(**saved_dict['args'])
+        return llr
+
+    def __init__(self, ll_est_path=None, bg_ll_est_path=None, _lr=None):
         super().__init__()
-        self.ll_est = ll_est
-        self.bg_ll_est = bg_ll_est
-        self.lr = None
+        self.ll_est_path = ll_est_path
+        self.bg_ll_est_path = bg_ll_est_path
+        self.lr = _lr
+
+        self.ll_est = load_gen(self.ll_est_path)
+        self.bg_ll_est = load_gen(self.bg_ll_est_path)
+
+    def get_args(self):
+        return {
+            'type': 'llr',
+            'args': {
+                'll_est_path': self.ll_est_path,
+                'bg_ll_est_path': self.bg_ll_est_path,
+                '_lr': self.lr
+            }
+        }
 
     def predict(self, x):
         x = x.type(torch.float)
@@ -211,14 +223,16 @@ def load_llr(in_dataset, out_dataset, mutation_rate, id=None):
     save_path = get_llr_path(in_dataset, out_dataset, mutation_rate, id=id)
     if not save_path.exists():
         return False
-    return torch.load(save_path)
+    saved_dict = torch.load(save_path)
+    return LikelihoodRatioDetector.load(saved_dict)
 
 
 def load_best_llr(in_dataset, out_dataset, id=None):
     save_path = get_best_llr_path(in_dataset, out_dataset, id=id)
     if not save_path.exists():
         return False
-    return torch.load(save_path)
+    saved_dict = torch.load(save_path)
+    return LikelihoodRatioDetector.load(saved_dict)
 
 
 if __name__ == '__main__':

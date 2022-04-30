@@ -206,12 +206,12 @@ def construct_dataset(dataset,
         np.save(path, data)
 
 
-def load_adv_dataset(dataset, attack, net_type, id=None):
+def load_adv_datasets(dataset, attack, net_type, classifier_id=None):
     data_root = pathlib.Path('adv_datasets')
     partitions = ['clean', 'adv', 'noise']
     paths = [f'{dataset}_{attack}_{partition}_{net_type}' for partition in partitions]
-    if id:
-        paths = [f'{path}_{id}' for path in paths]
+    if classifier_id:
+        paths = [f'{path}_{classifier_id}' for path in paths]
 
     paths = [data_root / f'{path}.npy' for path in paths]
     for path in paths:

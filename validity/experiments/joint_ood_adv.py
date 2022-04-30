@@ -11,16 +11,7 @@ from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, rec
 from validity.adv_dataset import load_adv_dataset
 from validity.datasets import load_datasets
 from validity.detectors.load import load_ood_detectors, load_adv_detectors
-from validity.detectors.lid import LIDDetector
-from validity.detectors.mahalanobis import MahalanobisDetector
-from validity.detectors.llr import LikelihoodRatioDetector
-from validity.detectors.odin import ODINDetector
 from validity.util import np_loader
-
-from validity.generators.mnist_vae import train as train_mnist_vae
-
-MNIST_VAE_KWARGS = {'beta': 20.}
-MNIST_BG_VAE_KWARGS = {'beta': 20., 'mutation_rate': 0.3}
 
 
 def joint_ood_adv(net_type,

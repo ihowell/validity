@@ -220,7 +220,10 @@ def train_lid_adv(dataset,
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    clean_data, adv_data, noisy_data = load_adv_dataset(dataset, adv_attack, net_type, id=id)
+    clean_data, adv_data, noisy_data = load_adv_dataset(dataset,
+                                                        adv_attack,
+                                                        net_type,
+                                                        classifier_id=id)
 
     detector = LIDDetector(classifier_path=weights_path, k=k, dataset=dataset)
     detector.cuda()

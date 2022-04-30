@@ -23,7 +23,7 @@ class MnistVAE(nn.Module):
 
     @classmethod
     def load(cls, saved_dict):
-        mnist_vae = MnistVAE(**saved_dict['args'])
+        mnist_vae = cls(**saved_dict['args'])
         mnist_vae.load_state_dict(saved_dict['state_dict'])
         return mnist_vae
 

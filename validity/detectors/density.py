@@ -149,7 +149,10 @@ def train_density_adv(dataset, net_type, weights_path, adv_attack, cuda_idx=0, i
     else:
         raise Exception('Dataset provided with unknown number of labels')
 
-    clean_data, adv_data, noise_data = load_adv_dataset(dataset, adv_attack, net_type, id=id)
+    clean_data, adv_data, noise_data = load_adv_dataset(dataset,
+                                                        adv_attack,
+                                                        net_type,
+                                                        classifier_id=id)
     idx = np.arange(clean_data.shape[0])
     np.random.shuffle(idx)
     pivot = int(clean_data.shape[0] * 0.1)
