@@ -16,6 +16,7 @@ from sklearn.linear_model import LogisticRegressionCV
 from sklearn.covariance import EmpiricalCovariance
 from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
 from scipy.spatial.distance import cdist
+from validity.adv_dataset import load_adv_datasets
 
 from validity.datasets import load_datasets
 from validity.classifiers.load import load_cls
@@ -92,12 +93,49 @@ class LIDDetector(nn.Module):
         temp_list = self.classifier.feature_list(data.cuda())[1]
         self.num_outputs = len(temp_list)
 
-    def evaluate(self, in_test_loader, out_test_loader, noise_test_loader):
+    def train(self, in_train_loader, out_train_loader, noise_train_loader):
         if self.num_outputs is None:
-            self.set_num_outputs(next(iter(in_test_loader))[0])
+            self.set_num_outputs(next(iter(in_train_loader))[0])
 
         # Compute LID scores for in and out distributions
         print('Computing LID')
+        LID_in = []
+        LID_out = []
+        LID_noise = []
+        out_test_iter = iter(out_train_loader)
+        noise_test_iter = iter(noise_train_loader)
+        for in_data, _ in tqdm(in_train_loader):
+            LID_in.append(self.score(in_data, in_data))
+            out_data = next(out_test_iter)[0]
+            LID_out.append(self.score(in_data, out_data))
+            noise_data = next(noise_test_iter)[0]
+            LID_noise.append(self.score(in_data, noise_data))
+        LID_in = np.concatenate(LID_in)
+        LID_out = np.concatenate(LID_out)
+        LID_noise = np.concatenate(LID_noise)
+
+        # Create train/validation and test sets
+        LID_in_val = LID_in[:int(LID_in.shape[0] * 0.1)]
+        LID_in_test = LID_in[int(LID_in.shape[0] * 0.1):]
+        LID_out_val, LID_out_test = LID_out[:int(LID_out.shape[0] *
+                                                 0.1)], LID_out[int(LID_out.shape[0] * 0.1):]
+        LID_noise_val, LID_noise_test = LID_noise[:int(LID_noise.shape[0] * 0.1
+                                                       )], LID_noise[int(LID_noise.shape[0] *
+                                                                         0.1):]
+
+        LID_train = np.concatenate([LID_in_val, LID_noise_val, LID_out_val])
+        labels_train = np.concatenate([
+            np.ones(LID_in_val.shape[0] + LID_noise_val.shape[0]),
+            np.zeros(LID_out_val.shape[0])
+        ])
+
+        # Train regressor
+        print('Training regressor')
+        self.lr = LogisticRegressionCV(n_jobs=-1).fit(LID_train, labels_train)
+
+    def evaluate(self, in_test_loader, out_test_loader, noise_test_loader):
+        assert self.num_outputs is not None
+
         LID_in = []
         LID_out = []
         LID_noise = []
@@ -113,29 +151,10 @@ class LIDDetector(nn.Module):
         LID_out = np.concatenate(LID_out)
         LID_noise = np.concatenate(LID_noise)
 
-        # Create train/validation and test sets
-        LID_in_val, LID_in_test = LID_in[:int(LID_in.shape[0] *
-                                              0.1)], LID_in[int(LID_in.shape[0] * 0.1):]
-        LID_out_val, LID_out_test = LID_out[:int(LID_out.shape[0] *
-                                                 0.1)], LID_out[int(LID_out.shape[0] * 0.1):]
-        LID_noise_val, LID_noise_test = LID_noise[:int(LID_noise.shape[0] * 0.1
-                                                       )], LID_noise[int(LID_noise.shape[0] *
-                                                                         0.1):]
-
-        LID_val = np.concatenate([LID_in_val, LID_noise_val, LID_out_val])
-        LID_test = np.concatenate([LID_in_test, LID_noise_test, LID_out_test])
-        labels_val = np.concatenate([
-            np.ones(LID_in_val.shape[0] + LID_noise_val.shape[0]),
-            np.zeros(LID_out_val.shape[0])
-        ])
-        labels_test = np.concatenate([
-            np.ones(LID_in_test.shape[0] + LID_noise_test.shape[0]),
-            np.zeros(LID_out_test.shape[0])
-        ])
-
-        # Train regressor
-        print('Training regressor')
-        self.lr = LogisticRegressionCV(n_jobs=-1).fit(LID_val, labels_val)
+        LID_test = np.concatenate([LID_in, LID_noise, LID_out])
+        labels_test = np.concatenate(
+            [np.ones(LID_in.shape[0] + LID_noise.shape[0]),
+             np.zeros(LID_out.shape[0])])
 
         # Evaluate regressor
         print('Evaluating regressor')
@@ -216,22 +235,26 @@ def train_lid_adv(dataset,
                   cuda_idx=0,
                   k=10,
                   id=None):
-    from validity.adv_dataset import load_adv_dataset
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
-
-    clean_data, adv_data, noisy_data = load_adv_dataset(dataset,
-                                                        adv_attack,
-                                                        net_type,
-                                                        classifier_id=id)
 
     detector = LIDDetector(classifier_path=weights_path, k=k, dataset=dataset)
     detector.cuda()
 
-    in_test_loader = np_loader(clean_data, True)
-    out_test_loader = np_loader(adv_data, False)
-    noise_test_loader = np_loader(noisy_data, True)
-    results = detector.evaluate(in_test_loader, out_test_loader, noise_test_loader)
+    data_dict = load_adv_datasets(dataset, adv_attack, net_type, classifier_id=id)
+    clean_train, clean_test = data_dict['clean']
+    adv_train, adv_test = data_dict['adv']
+    noise_train, noise_test = data_dict['noise']
+
+    in_train_loader = np_loader(clean_train, True)
+    out_train_loader = np_loader(adv_train, False)
+    noise_train_loader = np_loader(noise_train, True)
+    detector.traiin(in_train_loader, out_train_loader, noise_train_loader)
+
+    in_test_loader = np_loader(clean_test, True)
+    out_test_loader = np_loader(adv_test, False)
+    noise_test_loader = np_loader(noise_test, True)
+    results = detector.traiin(in_test_loader, out_test_loader, noise_test_loader)
 
     save_path = get_lid_path(net_type, dataset, adv_attack, k, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)

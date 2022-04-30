@@ -49,7 +49,7 @@ def load_detector_datasets(dataset, detector_train_prop=0.1, data_root='./datase
     """
     assert detector_train_prop <= 0.5
     train_ds, test_ds = load_datasets(dataset, data_root=data_root)
-    train_size = int(len(test_ds) * 0.1)
+    train_size = int(len(test_ds) * detector_train_prop)
     return [train_ds] + torch.utils.data.random_split(
         test_ds,
         [train_size, train_size, len(test_ds) - 2 * train_size],

@@ -13,7 +13,7 @@ from torchvision import transforms, datasets
 from tqdm import tqdm
 
 from validity.classifiers.load import load_cls
-from validity.datasets import load_datasets
+from validity.datasets import load_datasets, load_detector_datasets
 
 
 def construct_example(dataset, attack, net_type, weights_location, data_root='./datasets'):
@@ -63,7 +63,7 @@ def construct_dataset(dataset,
                       net_type,
                       weights_location,
                       data_root='./datasets',
-                      id=None):
+                      classifier_id=None):
     """Construct an adversarial dataset.
 
     Args:
@@ -82,6 +82,7 @@ def construct_dataset(dataset,
             confidence = 7.439  # Average logit marginal in training set
 
     network = load_cls(weights_location)
+    network = network.cuda()
     network.eval()
 
     if dataset == 'mnist':
@@ -116,123 +117,122 @@ def construct_dataset(dataset,
         elif dataset == 'cifar10':
             n_classes = 10
 
-    network = network.cuda()
-    network.eval()
+    clean = []
+    adv = []
+    noise = []
 
-    _, test_dataset = load_datasets(dataset, data_root=data_root)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=64, shuffle=False)
+    _, adv_train, _, adv_test = load_detector_datasets(dataset, data_root=data_root)
+    for ds in [adv_train, adv_test]:
+        test_loader = torch.utils.data.DataLoader(ds, batch_size=64, shuffle=False)
 
-    clean_data = []
-    adv_data = []
-    noisy_data = []
+        clean_data = []
+        adv_data = []
+        noise_data = []
 
-    accuracy = []
-    noise_accuracy = []
-    adv_accuracy = []
+        clean_accuracy = []
+        adv_accuracy = []
+        noise_accuracy = []
 
-    for data, labels in tqdm(test_loader):
-        data = data.cuda()
-        labels = labels.cuda()
+        for data, labels in tqdm(test_loader):
+            data = data.cuda()
+            labels = labels.cuda()
 
-        mean = torch.ones(data.shape) * ds_mean
-        std = torch.ones(data.shape) * ds_std
-        noise = torch.normal(mean, std).cuda()
-        noisy_d = torch.add(data, noise, alpha=random_noise_size)
-        noisy_d = torch.clamp(noisy_d, 0., 1.)
+            mean = torch.ones(data.shape) * ds_mean
+            std = torch.ones(data.shape) * ds_std
+            noise = torch.normal(mean, std).cuda()
+            noise_d = torch.add(data, noise, alpha=random_noise_size)
+            noise_d = torch.clamp(noise_d, 0., 1.)
 
-        if attack == 'fgsm':
-            adv_batch = fast_gradient_method(network,
-                                             data,
-                                             adv_noise,
-                                             np.inf,
-                                             clip_min=0.,
-                                             clip_max=1.)
-        elif attack == 'bim':
-            adv_batch = projected_gradient_descent(network,
-                                                   data,
-                                                   np.inf,
-                                                   adv_noise,
-                                                   5,
-                                                   np.inf,
-                                                   sanity_checks=False,
-                                                   rand_init=False,
-                                                   clip_min=0.,
-                                                   clip_max=1.)
-        elif attack == 'cwl2':
-            adv_batch = carlini_wagner_l2(network, data, n_classes, confidence=confidence)
-        adv_batch = adv_batch
+            if attack == 'fgsm':
+                adv_batch = fast_gradient_method(network,
+                                                 data,
+                                                 adv_noise,
+                                                 np.inf,
+                                                 clip_min=0.,
+                                                 clip_max=1.)
+            elif attack == 'bim':
+                adv_batch = projected_gradient_descent(network,
+                                                       data,
+                                                       np.inf,
+                                                       adv_noise,
+                                                       5,
+                                                       np.inf,
+                                                       sanity_checks=False,
+                                                       rand_init=False,
+                                                       clip_min=0.,
+                                                       clip_max=1.)
+            elif attack == 'cwl2':
+                adv_batch = carlini_wagner_l2(network, data, n_classes, confidence=confidence)
 
-        logits = network(data)
-        preds = torch.argmax(logits, 1)
-        noise_logits = network(noisy_d)
-        noise_preds = torch.argmax(noise_logits, 1)
-        adv_logits = network(adv_batch)
-        adv_preds = torch.argmax(adv_logits, 1)
+            logits = network(data)
+            preds = torch.argmax(logits, 1)
+            noise_logits = network(noise_d)
+            noise_preds = torch.argmax(noise_logits, 1)
+            adv_logits = network(adv_batch)
+            adv_preds = torch.argmax(adv_logits, 1)
 
-        accuracy.append(
-            torch.mean(torch.where(preds == labels, 1., 0.)).cpu().detach().numpy())
-        noise_accuracy.append(
-            torch.mean(torch.where(noise_preds == labels, 1., 0.)).cpu().detach().numpy())
-        adv_accuracy.append(
-            torch.mean(torch.where(adv_preds == labels, 1., 0.)).cpu().detach().numpy())
+            clean_accuracy.append(
+                torch.mean(torch.where(preds == labels, 1., 0.)).cpu().detach().numpy())
+            noise_accuracy.append(
+                torch.mean(torch.where(noise_preds == labels, 1., 0.)).cpu().detach().numpy())
+            adv_accuracy.append(
+                torch.mean(torch.where(adv_preds == labels, 1., 0.)).cpu().detach().numpy())
 
-        indices = torch.where(torch.logical_and(noise_preds == labels, adv_preds != labels))[0]
-        data = torch.index_select(data, 0, indices)
-        noisy_d = torch.index_select(noisy_d, 0, indices)
-        adv_batch = torch.index_select(adv_batch, 0, indices)
+            indices = torch.where(torch.logical_and(noise_preds == labels,
+                                                    adv_preds != labels))[0]
+            data = torch.index_select(data, 0, indices)
+            noise_d = torch.index_select(noise_d, 0, indices)
+            adv_batch = torch.index_select(adv_batch, 0, indices)
 
-        clean_data.append(data.cpu().numpy())
-        noisy_data.append(noisy_d.cpu().numpy())
-        adv_data.append(adv_batch.cpu().detach().numpy())
-    clean_data = np.concatenate(clean_data)
-    adv_data = np.concatenate(adv_data)
-    noisy_data = np.concatenate(noisy_data)
+            clean_data.append(data.cpu().numpy())
+            noise_data.append(noise_d.cpu().numpy())
+            adv_data.append(adv_batch.cpu().detach().numpy())
+        clean_data = np.concatenate(clean_data)
+        adv_data = np.concatenate(adv_data)
+        noise_data = np.concatenate(noise_data)
 
-    print(f'Accuracy: {np.mean(accuracy)}')
-    print(f'Noise Accuracy: {np.mean(noise_accuracy)}')
-    print(f'Adversarial Accuracy: {np.mean(adv_accuracy)}')
-    print(f'Data after filtering: {clean_data.shape[0]}')
+        clean.append(clean_data)
+        adv.append(adv_data)
+        noise.append(noise_data)
 
-    files = [(f'{dataset}_{attack}_clean_{net_type}', clean_data),
-             (f'{dataset}_{attack}_adv_{net_type}', adv_data),
-             (f'{dataset}_{attack}_noise_{net_type}', noisy_data)]
-    if id:
-        files = [(f'{name}_{id}', data) for (name, data) in files]
+        print(f'Clean Accuracy: {np.mean(clean_accuracy)}')
+        print(f'Noise Accuracy: {np.mean(noise_accuracy)}')
+        print(f'Adversarial Accuracy: {np.mean(adv_accuracy)}')
+        print(f'Data after filtering: {clean_data.shape[0]}')
 
+    save_path = get_adv_dataset_path(dataset, attack, net_type, classifier_id=classifier_id)
+    save_path.parent.mkdir(exist_ok=True, parents=True)
+    np.savez(save_path,
+             clean_train=clean[0],
+             clean_test=clean[1],
+             adv_train=adv[0],
+             adv_test=adv[1],
+             noise_train=noise[0],
+             noise_test=noise[1])
+
+
+def get_adv_dataset_path(dataset, attack, net_type, classifier_id=None):
     data_root = pathlib.Path('adv_datasets')
     data_root.mkdir(exist_ok=True, parents=True)
-    for name, data in files:
-        path = data_root / f'{name}.npy'
-        np.save(path, data)
+    file_name = f'{dataset}_{attack}_{net_type}'
+    if classifier_id:
+        file_name = f'{file_name}_{classifier_id}'
+    return data_root / f'{file_name}.npz'
 
 
 def load_adv_datasets(dataset, attack, net_type, classifier_id=None):
-    data_root = pathlib.Path('adv_datasets')
-    partitions = ['clean', 'adv', 'noise']
-    paths = [f'{dataset}_{attack}_{partition}_{net_type}' for partition in partitions]
-    if classifier_id:
-        paths = [f'{path}_{classifier_id}' for path in paths]
-
-    paths = [data_root / f'{path}.npy' for path in paths]
-    for path in paths:
-        if not path.exists():
-            return False
-
-    return [np.load(path) for path in paths]
+    save_path = get_adv_dataset_path(dataset, attack, net_type, classifier_id=classifier_id)
+    data_dict = np.load(save_path)
+    return {
+        'clean': (data_dict['clean_train'], data_dict['clean_test']),
+        'adv': (data_dict['adv_train'], data_dict['adv_test']),
+        'noise': (data_dict['noise_train'], data_dict['noise_test']),
+    }
 
 
-def adv_dataset_exists(dataset, attack, net_type, id=None):
-    data_root = pathlib.Path('adv_datasets')
-    partitions = ['clean', 'adv', 'noise']
-    paths = [f'{dataset}_{attack}_{partition}_{net_type}' for partition in partitions]
-    if id:
-        paths = [f'{path}_{id}' for path in paths]
-
-    paths = [data_root / f'{path}.npy' for path in paths]
-    for path in paths:
-        if not path.exists():
-            return False
-    return True
+def adv_dataset_exists(dataset, attack, net_type, classifier_id=None):
+    save_path = get_adv_dataset_path(dataset, attack, net_type, classifier_id=classifier_id)
+    return save_path.exists()
 
 
 def calculate_channel_means(dataset):

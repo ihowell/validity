@@ -16,7 +16,7 @@ from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, rec
 from sklearn.preprocessing import StandardScaler
 
 from validity.classifiers.load import load_cls
-from validity.datasets import load_datasets
+from validity.datasets import load_datasets, load_detector_datasets
 
 
 class ODINDetector(nn.Module):
@@ -155,12 +155,12 @@ def train_odin(in_dataset,
     odin = ODINDetector(weights_path, magnitude, temperature)
     odin = odin.cuda()
 
-    _, in_test_ds = load_datasets(in_dataset)
-    _, out_test_ds = load_datasets(out_dataset)
-    in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)
-    out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=64, shuffle=True)
+    _, _, in_val_ds, _ = load_detector_datasets(in_dataset, data_root=data_root)
+    _, _, out_val_ds, _ = load_detector_datasets(out_dataset, data_root=data_root)
+    in_val_loader = torch.utils.data.DataLoader(in_val_ds, batch_size=64, shuffle=True)
+    out_val_loader = torch.utils.data.DataLoader(out_val_ds, batch_size=64, shuffle=True)
 
-    results = odin.train(in_test_loader, out_test_loader)
+    results = odin.train(in_val_loader, out_val_loader)
 
     save_path = get_odin_path(net_type, in_dataset, out_dataset, magnitude, temperature, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)

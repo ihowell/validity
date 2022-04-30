@@ -188,7 +188,6 @@ def run_experiment(cfg_file, high_performance=False):
                            train_llr_ood,
                            in_dataset,
                            out_dataset,
-                           'mnist_vae',
                            eval_vae_path,
                            eval_bg_vae_path,
                            0.3,

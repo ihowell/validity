@@ -89,8 +89,8 @@ def run_experiment(cls_type, in_dataset, out_dataset, high_performance=False, su
     llr_path = get_llr_path(in_dataset, out_dataset, 0.3)
     mahalanobis_ood_path = get_best_mahalanobis_ood_path(cls_type, in_dataset, out_dataset)
     c_func(odin_path, train_multiple_odin, in_dataset, out_dataset, cls_type, cls_path)
-    c_func(llr_path, train_llr_ood, in_dataset, out_dataset, 'mnist_vae', eval_vae_path,
-           eval_bg_vae_path, 0.3)
+    c_func(llr_path, train_llr_ood, in_dataset, out_dataset, eval_vae_path, eval_bg_vae_path,
+           0.3)
     c_func(mahalanobis_ood_path, train_multiple_mahalanobis_ood, in_dataset, out_dataset,
            cls_type, cls_path)
 

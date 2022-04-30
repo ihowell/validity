@@ -16,6 +16,7 @@ from sklearn.covariance import EmpiricalCovariance
 from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
 from sklearn.preprocessing import StandardScaler
 
+from validity.adv_dataset import load_adv_datasets
 from validity.classifiers.load import load_cls
 from validity.datasets import load_datasets, load_detector_datasets, get_dataset_info
 from validity.util import np_loader
@@ -328,8 +329,7 @@ def train_mahalanobis_ood(in_dataset,
                                    num_classes=ds_info.num_labels,
                                    noise_magnitude=magnitude)
 
-    cls_train_ds, _, in_val_ds, in_test_ds = load_detector_datasets(in_dataset,
-                                                                    data_root=data_root)
+    cls_train_ds, _, in_val_ds, _ = load_detector_datasets(in_dataset, data_root=data_root)
     cls_train_loader = torch.utils.data.DataLoader(cls_train_ds, batch_size=64, shuffle=True)
 
     print('Calculating sample statistics')
@@ -338,7 +338,7 @@ def train_mahalanobis_ood(in_dataset,
     in_val_loader = torch.utils.data.DataLoader(in_val_ds, batch_size=64, shuffle=True)
     _, _, out_val_ds, _ = load_detector_datasets(out_dataset)
     out_val_loader = torch.utils.data.DataLoader(out_val_ds, batch_size=64, shuffle=True)
-    results = detector.evaluate(in_val_loader, out_val_loader)
+    results = detector.validate(in_val_loader, out_val_loader)
 
     save_path = get_mahalanobis_ood_path(net_type,
                                          in_dataset,
@@ -375,17 +375,16 @@ def train_mahalanobis_adv(dataset,
                           magnitude=1e-2,
                           batch_size=64,
                           classifier_id=None):
-    from validity.adv_dataset import load_adv_dataset
 
     torch.cuda.manual_seed(0)
     torch.cuda.set_device(cuda_idx)
 
     ds_info = get_dataset_info(dataset)
 
-    clean_data, adv_data, noisy_data = load_adv_dataset(dataset,
-                                                        adv_attack,
-                                                        net_type,
-                                                        classifier_id=classifier_id)
+    data_dict = load_adv_datasets(dataset, adv_attack, net_type, classifier_id=classifier_id)
+    clean_val_data = data_dict['clean'][0]
+    adv_val_data = data_dict['adv'][0]
+    noise_val_data = data_dict['noise'][0]
 
     detector = MahalanobisDetector(classifier_path=weights_path,
                                    num_classes=ds_info.num_labels,
@@ -399,10 +398,11 @@ def train_mahalanobis_adv(dataset,
     print('Calculating sample statistics')
     detector.sample_estimator(cls_train_loader)
 
-    in_test_loader = np_loader(clean_data, True)
-    out_test_loader = np_loader(adv_data, False)
-    noise_test_loader = np_loader(noisy_data, True)
-    results = detector.evaluate(in_test_loader, out_test_loader, noise_test_loader)
+    in_val_loader = np_loader(clean_val_data, True)
+    out_val_loader = np_loader(adv_val_data, False)
+    noise_val_loader = np_loader(noise_val_data, True)
+
+    results = detector.validate(in_val_loader, out_val_loader, noise_val_loader)
 
     save_path = get_mahalanobis_adv_path(net_type,
                                          dataset,

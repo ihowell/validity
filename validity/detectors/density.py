@@ -11,9 +11,9 @@ from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
 from sklearn.neighbors import KernelDensity
 
-from validity.adv_dataset import load_adv_dataset
+from validity.adv_dataset import load_adv_datasets
 from validity.classifiers.load import load_cls
-from validity.datasets import load_datasets
+from validity.datasets import get_dataset_info, load_datasets
 from validity.util import np_loader
 
 BANDWIDTHS = {'mnist': 1.20, 'cifar10': 0.26, 'svhn': 1.00}
@@ -142,31 +142,15 @@ def train_density_adv(dataset, net_type, weights_path, adv_attack, cuda_idx=0, i
     np.random.seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    if dataset == 'mnist':
-        num_labels = 10
-    elif dataset == 'cifar10':
-        num_labels = 10
-    else:
-        raise Exception('Dataset provided with unknown number of labels')
+    ds_info = get_dataset_info(dataset)
 
-    clean_data, adv_data, noise_data = load_adv_dataset(dataset,
-                                                        adv_attack,
-                                                        net_type,
-                                                        classifier_id=id)
-    idx = np.arange(clean_data.shape[0])
-    np.random.shuffle(idx)
-    pivot = int(clean_data.shape[0] * 0.1)
-    train_idx, test_idx = idx[:pivot], idx[pivot:]
-
-    clean_train_data = np.take(clean_data, train_idx, axis=0)
-    clean_test_data = np.take(clean_data, test_idx, axis=0)
-    adv_train_data = np.take(adv_data, train_idx, axis=0)
-    adv_test_data = np.take(adv_data, test_idx, axis=0)
-    noise_train_data = np.take(noise_data, train_idx, axis=0)
-    noise_test_data = np.take(noise_data, test_idx, axis=0)
+    data_dict = load_adv_datasets(dataset, adv_attack, net_type, classifier_id=id)
+    clean_train, clean_test = data_dict['clean']
+    adv_train, adv_test = data_dict['adv']
+    noise_train, noise_test = data_dict['noise']
 
     detector = DensityDetector(classifier_path=weights_path,
-                               num_labels=num_labels,
+                               num_labels=ds_info.num_labels,
                                train_ds_name=dataset)
     detector.cuda()
 
@@ -176,15 +160,15 @@ def train_density_adv(dataset, net_type, weights_path, adv_attack, cuda_idx=0, i
     detector.train_kdes(in_train_loader)
 
     print('Training LR')
-    in_train_loader = np_loader(clean_train_data, True)
-    out_train_loader = np_loader(adv_train_data, False)
-    noise_train_loader = np_loader(noise_train_data, False)
+    in_train_loader = np_loader(clean_train, True)
+    out_train_loader = np_loader(adv_train, False)
+    noise_train_loader = np_loader(noise_train, False)
     detector.train_lr(in_train_loader, out_train_loader, noise_train_loader)
 
     print('Evaluating')
-    in_test_loader = np_loader(clean_test_data, True)
-    out_test_loader = np_loader(adv_test_data, False)
-    noise_test_loader = np_loader(noise_test_data, False)
+    in_test_loader = np_loader(clean_test, True)
+    out_test_loader = np_loader(adv_test, False)
+    noise_test_loader = np_loader(noise_test, False)
     results = detector.evaluate(in_test_loader, out_test_loader, noise_test_loader)
 
     save_path = get_density_path(net_type, dataset, adv_attack, id=id)

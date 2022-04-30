@@ -9,7 +9,7 @@ from tqdm import tqdm
 from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
 from sklearn.linear_model import LogisticRegressionCV
 
-from validity.datasets import load_datasets
+from validity.datasets import load_datasets, load_detector_datasets
 from validity.generators.load import load_gen
 
 
@@ -40,6 +40,8 @@ class LikelihoodRatioDetector(nn.Module):
         }
 
     def predict(self, x):
+        self.ll_est.eval()
+        self.bg_ll_est.eval()
         x = x.type(torch.float)
         x = x.cuda()
         llr = self.ll_est.log_prob(x) - self.bg_ll_est.log_prob(x)
@@ -48,6 +50,8 @@ class LikelihoodRatioDetector(nn.Module):
         return self.lr.predict(llr)
 
     def predict_proba(self, x):
+        self.ll_est.eval()
+        self.bg_ll_est.eval()
         x = x.type(torch.float)
         x = x.cuda()
         llr = self.ll_est.log_prob(x) - self.bg_ll_est.log_prob(x)
@@ -122,50 +126,35 @@ class LikelihoodRatioDetector(nn.Module):
 
 def train_llr_ood(in_dataset,
                   out_dataset,
-                  net_type,
                   foreground_path,
                   background_path,
                   mutation_rate,
                   data_root='./datasets',
                   cuda_idx=0,
                   id=None):
-    from validity.generators.nvae.model import load_nvae
-    from validity.generators.mnist_vae import MnistVAE
     torch.cuda.manual_seed(0)
     np.random.seed(0)
     torch.cuda.set_device(cuda_idx)
 
-    # load models
-    if net_type == 'nvae':
-        foreground = load_nvae(foreground_path, batch_size=1)
-        background = load_nvae(background_path, batch_size=1)
-    elif net_type == 'mnist_vae':
-        foreground = MnistVAE()
-        foreground.load_state_dict(torch.load(foreground_path))
-        background = MnistVAE()
-        background.load_state_dict(torch.load(background_path))
-
-    foreground = foreground.cuda()
-    background = background.cuda()
-    foreground.eval()
-    background.eval()
-
-    detector = LikelihoodRatioDetector(foreground, background)
+    detector = LikelihoodRatioDetector(foreground_path, background_path)
 
     # load datasets
-    in_train_ds, in_test_ds = load_datasets(in_dataset)
-    out_train_ds, out_test_ds = load_datasets(out_dataset)
+    _, _, in_ood_train_ds, in_test_ds = load_detector_datasets(in_dataset, data_root=data_root)
+    _, _, out_ood_train_ds, out_test_ds = load_detector_datasets(out_dataset,
+                                                                 data_root=data_root)
 
-    in_train_loader = torch.utils.data.DataLoader(in_train_ds, batch_size=64, shuffle=True)
-    in_val_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)
-    out_train_loader = torch.utils.data.DataLoader(out_train_ds, batch_size=64, shuffle=True)
-    out_val_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=64, shuffle=True)
+    in_train_loader = torch.utils.data.DataLoader(in_ood_train_ds, batch_size=64, shuffle=True)
+    in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)
+    out_train_loader = torch.utils.data.DataLoader(out_ood_train_ds,
+                                                   batch_size=64,
+                                                   shuffle=True)
+    out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=64, shuffle=True)
 
     # train detector
     detector.train(in_train_loader, out_train_loader)
 
     # evaluate detector
-    results = detector.evaluate(in_val_loader, out_val_loader)
+    results = detector.evaluate(in_test_loader, out_test_loader)
 
     save_path = get_llr_path(in_dataset, out_dataset, mutation_rate, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)
