@@ -5,42 +5,24 @@ import torch
 from validity.util import NPZDataset
 
 from .mnist_vae import MnistVAE
-from .nvae.model import load_nvae
 from .wgan_gp import WGAN_GP
 
 
-def load_gen(gen_type, weights_path, dataset):
-    if dataset == 'mnist':
-        num_channels = 1
-    elif dataset == 'fmnist':
-        num_channels = 1
+def load_gen(weights_path):
+    saved_dict = torch.load(weights_path)
+    gen_type = saved_dict['type']
 
     if gen_type == 'mnist_vae':
-        generator = MnistVAE()
-        generator.load_state_dict(torch.load(weights_path))
-
-    elif gen_type == 'nvae':
-        generator = load_nvae(weights_path, batch_size=1)
-
-        def encode(x):
-            z, combiner_cells_s = generator.encode(x)
-            return [z] + combiner_cells_s
-
-        def decode(zs):
-            z, combiner_cells_s = zs[0], zs[1:]
-            logits, log_p = generator.decode(z, combiner_cells_s, 1.)
-            return generator.decoder_output(logits).sample(), log_p
-
+        gen = MnistVAE.load(saved_dict)
     elif gen_type == 'wgan_gp':
-        generator = WGAN_GP(num_channels=num_channels)
-        generator.load_state_dict(torch.load(weights_path))
-
-    generator = generator.cuda()
-    return generator
+        gen = WGAN_GP.load(saved_dict)
+    else:
+        raise Exception(f'Unknown generator type: {gen_type}')
+    return gen
 
 
 def load_encoded_ds(dataset, gen_type, encode_dir=None, id=None):
-    ds_path = get_encoded_ds_path(dataset, gen_type, encode_dir=None, id=None)
+    ds_path = get_encoded_ds_path(dataset, gen_type, encode_dir=encode_dir, id=id)
     return NPZDataset(ds_path)
 
 

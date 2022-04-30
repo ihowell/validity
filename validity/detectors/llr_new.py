@@ -21,7 +21,7 @@ BANDWIDTHS = {'mnist': 1.20, 'cifar': 0.26, 'svhn': 1.00}
 
 class LikelihoodRatioDetector(nn.Module):
 
-    def __init__(self, ll_est=None, bg_ll_est=None):
+    def __init__(self, ll_est_path=None, bg_ll_est_path=None):
         super().__init__()
         self.ll_est = ll_est
         self.bg_ll_est = bg_ll_est

@@ -25,31 +25,41 @@ MNIST_BG_VAE_KWARGS = {'beta': 20., 'mutation_rate': 0.3}
 
 def joint_ood_adv(net_type,
                   in_ds_name,
-                  out_ds_name,
+                  out_ds_names,
                   adv_attacks,
-                  data_root='./datasets/',
-                  batch_size=64):
+                  batch_size=64,
+                  data_root='./datasets/'):
+    """
+    Assumpmtions:
+    * The first dataset name in `out_ds_names` is the ood dataset that detectors were trained on.
+    """
     torch.cuda.manual_seed(0)
     if type(adv_attacks) == 'str':
         adv_attacks = [adv_attacks]
 
-    # Load datasets
-    _, in_test_ds = load_datasets(in_ds_name)
-    _, out_test_ds = load_datasets(out_ds_name)
+    # Load in-distribution dataset
+    _, in_test_ds = load_datasets(in_ds_name, data_root=data_root)
+
     in_test_loader = torch.utils.data.DataLoader(in_test_ds,
                                                  batch_size=batch_size,
                                                  shuffle=False)
-    out_test_loader = torch.utils.data.DataLoader(out_test_ds,
-                                                  batch_size=batch_size,
-                                                  shuffle=False)
 
+    # Load adversarial datasets
     adv_datasets = {}
     for adv_attack in adv_attacks:
         _, adv_data, _ = load_adv_dataset(in_ds_name, adv_attack, net_type)
         adv_datasets[adv_attack] = adv_data[500:]
 
+    # Load OOD datasets
+    ood_loaders = {}
+    for out_ds_name in out_ds_names:
+        _, out_test_ds = load_datasets(out_ds_name, data_root=data_root)
+        ood_loaders[out_ds_name] = torch.utils.data.DataLoader(out_test_ds,
+                                                               batch_size=batch_size,
+                                                               shuffle=False)
+
     # Load detectors
-    ood_detectors = load_ood_detectors(net_type, in_ds_name, out_ds_name)
+    ood_detectors = load_ood_detectors(net_type, in_ds_name, out_ds_names[0])
     adv_detectors = []
     for adv_attack in adv_attacks:
         adv_detectors = adv_detectors + load_adv_detectors(net_type, in_ds_name, adv_attack)
@@ -74,13 +84,14 @@ def joint_ood_adv(net_type,
     ood_res = {}
     ood_preds = {}
     for detector_name, detector in detectors:
+        ood_res[detector_name] = {}
+        ood_preds[detector_name] = {}
         preds = []
         for batch, _ in tqdm(out_test_loader, desc=f'{detector_name}, ood {out_ds_name}'):
             preds.append(detector.predict(batch))
         preds = np.concatenate(preds)
         labels = np.ones(preds.shape[0])
 
-        ood_res[detector_name] = {}
         ood_res[detector_name]['accuracy'] = accuracy_score(labels, preds)
         ood_preds[detector_name] = preds
 

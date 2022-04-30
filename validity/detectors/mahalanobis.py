@@ -375,6 +375,7 @@ def train_mahalanobis_adv(dataset,
                           data_root='./datasets',
                           cuda_idx=0,
                           magnitude=1e-2,
+                          batch_size=64,
                           id=None):
     from validity.adv_dataset import load_adv_dataset
 
@@ -393,7 +394,9 @@ def train_mahalanobis_adv(dataset,
                                    noise_magnitude=magnitude)
 
     train_ds, _ = load_datasets(dataset)
-    in_train_loader = torch.utils.data.DataLoader(train_ds, batch_size=64, shuffle=False)
+    in_train_loader = torch.utils.data.DataLoader(train_ds,
+                                                  batch_size=batch_size,
+                                                  shuffle=False)
 
     detector.train(in_train_loader)
 
@@ -541,8 +544,8 @@ def evaluate_best_mahalanobis_ood(net_type, in_dataset, out_dataset, id=None):
     detector = load_best_mahalanobis_ood(net_type, in_dataset, out_dataset, id=id)
     detector.eval()
 
-    in_train_ds, in_test_ds = load_datasets(in_dataset)
-    out_train_ds, out_test_ds = load_datasets(out_dataset)
+    _, in_test_ds = load_datasets(in_dataset)
+    _, out_test_ds = load_datasets(out_dataset)
 
     in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)
     out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=64, shuffle=True)

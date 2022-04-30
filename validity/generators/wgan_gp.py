@@ -20,6 +20,12 @@ from validity.util import EarlyStopping, loop_gen, get_executor
 
 class WGAN_GP(nn.Module):
 
+    @classmethod
+    def load(cls, saved_dict):
+        wgan_gp = WGAN_GP(**saved_dict['args'])
+        wgan_gp.load_state_dict(saved_dict['state'])
+        return wgan_gp
+
     def __init__(self, critic_iter=5, lambda_term=10, num_channels=3):
         super().__init__()
         self.critic_iter = critic_iter
@@ -53,6 +59,16 @@ class WGAN_GP(nn.Module):
             nn.Flatten(),
             nn.Linear(4 * 4 * 256, 1),
         )
+
+    def get_args(self):
+        return {
+            'args': {
+                'critic_iter': self.critic_iter,
+                'lambda_term': self.lambda_term,
+            },
+            'type': 'wgan_gp',
+            'state_dict': self.state_dict()
+        }
 
     def encode(self, x, attempts=8, writer=None):
         z = torch.randn((x.size(0), attempts, 128), requires_grad=True, device='cuda')

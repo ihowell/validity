@@ -21,6 +21,12 @@ CLIP_GRAD_VALUE = 10.
 
 class MnistVAE(nn.Module):
 
+    @classmethod
+    def load(cls, saved_dict):
+        mnist_vae = MnistVAE(**saved_dict['args'])
+        mnist_vae.load_state_dict(saved_dict['state_dict'])
+        return mnist_vae
+
     def __init__(self, beta=1.):
         super().__init__()
         self.beta = beta
@@ -55,6 +61,15 @@ class MnistVAE(nn.Module):
             nn.ReLU(),
             nn.Conv2d(16, 1, 3, padding='same'),
         ])
+
+    def get_args(self):
+        return {
+            'type': 'mnist_vae',
+            'args': {
+                'beta': self.beta,
+            },
+            'state_dict': self.state_dict()
+        }
 
     def encode(self, x):
         # Encode to a random code
