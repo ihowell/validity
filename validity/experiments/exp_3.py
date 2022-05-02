@@ -353,6 +353,7 @@ def run_experiment(cfg_file, high_performance=False):
                                                        cls_type,
                                                        gen_cfg['type'],
                                                        classifier_id=id,
+                                                       subset=cfg['contrastive_subset'],
                                                        **cfg.get('contrastive_kwargs'))
 
     # Evaluate contrastive examples

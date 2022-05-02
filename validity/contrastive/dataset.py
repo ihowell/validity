@@ -69,7 +69,8 @@ def combine_contrastive_dataset_shards(contrastive_type,
                                        generator_net_type,
                                        shards=20,
                                        classifier_id=None,
-                                       subset=None):
+                                       subset=None,
+                                       **kwargs):
     examples = []
     example_labels = []
     for i in range(shards):

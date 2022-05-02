@@ -220,7 +220,7 @@ def train(beta=1.,
 
     optimizer = optim.Adam(vae.parameters(), weight_decay=1e-4)
 
-    early_stopping = EarlyStopping(vae.state_dict(), save_path, patience=50)
+    early_stopping = EarlyStopping(vae.get_args(), save_path, patience=50)
 
     step = 0
 
@@ -318,8 +318,7 @@ def encode_dataset(weights_path,
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
-    vae = MnistVAE()
-    vae.load_state_dict(torch.load(weights_path))
+    vae = MnistVAE.load(weights_path)
     vae = vae.cuda()
     vae.eval()
 

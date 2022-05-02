@@ -9,9 +9,7 @@ from .wgan_gp import WGAN_GP
 
 
 def load_gen(weights_path):
-    print(f'{weights_path=}')
     saved_dict = torch.load(weights_path)
-    print(f'{saved_dict.keys()=}')
     gen_type = saved_dict['type']
 
     if gen_type == 'mnist_vae':

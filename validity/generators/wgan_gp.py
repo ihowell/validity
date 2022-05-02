@@ -207,7 +207,7 @@ def train(dataset,
         imgs = gan.sample(3)
         writer.add_images(f'train/samples', imgs, step)
 
-        torch.save(gan.state_dict(), save_path)
+        torch.save(gan.get_args(), save_path)
         step += 1
 
 
