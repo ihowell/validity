@@ -7,18 +7,10 @@ import torch
 
 from tabulate import tabulate
 from tqdm import tqdm
-from torchvision import datasets, transforms
-from sklearn.metrics import roc_curve, auc, accuracy_score, precision_score, recall_score
 
-from validity.adv_dataset import load_adv_dataset
 from validity.classifiers.load import load_cls
-from validity.datasets import load_datasets
 from validity.detectors.load import load_detectors
-from validity.detectors.lid import LIDDetector
-from validity.detectors.llr import LikelihoodRatioDetector
-from validity.detectors.mahalanobis import MahalanobisDetector
-from validity.detectors.odin import ODINDetector
-from validity.util import np_loader, NPZDataset
+from validity.util import NPZDataset
 
 
 def eval_contrastive_ds(contrastive_method,

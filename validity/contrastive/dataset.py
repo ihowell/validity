@@ -5,6 +5,7 @@ import fire
 import torch
 import numpy as np
 
+from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from validity.classifiers.load import load_cls
@@ -30,10 +31,11 @@ def make_contrastive_dataset(contrastive_type,
                              seed=0,
                              classifier_id=None,
                              subset=None,
+                             local=False,
                              **kwargs):
     assert contrastive_type in ['am', 'xgems', 'cdeepex']
 
-    executor = get_executor()
+    executor = get_executor(local)
     with executor.batch():
         jobs = submit_contrastive_dataset_jobs(executor,
                                                contrastive_type,
@@ -163,6 +165,16 @@ def _make_contrastive_dataset_job(contrastive_type,
 
     num_labels = 10
 
+    print('Loading classifier')
+    classifier = load_cls(classifier_weights_path)
+    classifier = classifier.cuda()
+    classifier.eval()
+
+    print('Loading generator')
+    generator = load_gen(generator_weights_path)
+    generator = generator.cuda()
+    generator.eval()
+
     print('Loading datasets')
     _, test_ds = load_datasets(dataset)
     encoded_test_ds = None
@@ -173,36 +185,39 @@ def _make_contrastive_dataset_job(contrastive_type,
         print('No cached encoded dataset found')
 
     if subset:
-        test_ds = torch.utils.data.Subset(test_ds, range(subset))
+        test_ds = Subset(test_ds, range(subset))
         if encoded_test_ds:
-            encoded_test_ds = torch.utils.data.Subset(encoded_test_ds, range(subset))
+            encoded_test_ds = Subset(encoded_test_ds, range(subset))
 
     print('Sharding dataset')
     n = len(test_ds)
     shard_lower = (n * shard_idx) // shards
     shard_upper = (n * (shard_idx + 1)) // shards
-    test_ds = torch.utils.data.Subset(test_ds, range(shard_lower, shard_upper))
+    test_ds = Subset(test_ds, range(shard_lower, shard_upper))
+
+    print('Filtering dataset')
+    correct_mask = []
+    for (data, label) in tqdm(DataLoader(test_ds, batch_size=batch_size, shuffle=False)):
+        data = data.cuda()
+        label = label.cuda()
+        preds = classifier(data).argmax(-1)
+        correct_mask.append(preds == label)
+    correct_mask = torch.concat(correct_mask)
+    correct_mask_idx = torch.where(correct_mask)[0]
+    print(f'{correct_mask.shape=}')
+    print(f'{correct_mask_idx=}')
+
+    test_ds = Subset(test_ds, correct_mask_idx)
     tiled_ds = TiledDataset(test_ds, num_labels)
-    tiled_loader = torch.utils.data.DataLoader(tiled_ds, batch_size=batch_size, shuffle=False)
+    tiled_loader = DataLoader(tiled_ds, batch_size=batch_size, shuffle=False)
 
     if encoded_test_ds:
-        encoded_test_ds = torch.utils.data.Subset(encoded_test_ds,
-                                                  range(shard_lower, shard_upper))
+        encoded_test_ds = Subset(encoded_test_ds, range(shard_lower, shard_upper))
         encoded_tiled_ds = TiledDataset(encoded_test_ds, num_labels)
-        encoded_test_loader = torch.utils.data.DataLoader(encoded_tiled_ds,
-                                                          batch_size=batch_size,
-                                                          shuffle=False)
+        encoded_test_loader = DataLoader(encoded_tiled_ds,
+                                         batch_size=batch_size,
+                                         shuffle=False)
         encoded_iter = iter(encoded_test_loader)
-
-    print('Loading classifier')
-    classifier = load_cls(classifier_weights_path)
-    classifier = classifier.cuda()
-    classifier.eval()
-
-    print('Loading generator')
-    generator = load_gen(generator_net_type, generator_weights_path, dataset)
-    generator = generator.cuda()
-    generator.eval()
 
     examples = []
     example_labels = []

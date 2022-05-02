@@ -221,8 +221,8 @@ def get_save_path(dataset, lambda_term, critic_iter, id=None):
     return save_path
 
 
-def submit_train_multiple(dataset, lambda_terms, critic_iters, **kwargs):
-    executor = get_executor()
+def submit_train_multiple(dataset, lambda_terms, critic_iters, local=False, **kwargs):
+    executor = get_executor(local)
     jobs = []
     with executor.batch():
         for lambda_term in lambda_terms:
@@ -264,8 +264,9 @@ def encode_dataset(dataset,
                    data_root='./datasets/',
                    cuda_idx=0,
                    seed=0,
-                   encode_path=None):
-    executor = get_executor()
+                   encode_path=None,
+                   local=False):
+    executor = get_executor(local)
     jobs = []
     with executor.batch():
         for i in range(shards):

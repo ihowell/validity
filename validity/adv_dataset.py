@@ -117,9 +117,9 @@ def construct_dataset(dataset,
         elif dataset == 'cifar10':
             n_classes = 10
 
-    clean = []
-    adv = []
-    noise = []
+    clean_arr = []
+    adv_arr = []
+    noise_arr = []
 
     _, adv_train, _, adv_test = load_detector_datasets(dataset, data_root=data_root)
     for ds in [adv_train, adv_test]:
@@ -191,9 +191,9 @@ def construct_dataset(dataset,
         adv_data = np.concatenate(adv_data)
         noise_data = np.concatenate(noise_data)
 
-        clean.append(clean_data)
-        adv.append(adv_data)
-        noise.append(noise_data)
+        clean_arr.append(clean_data)
+        adv_arr.append(adv_data)
+        noise_arr.append(noise_data)
 
         print(f'Clean Accuracy: {np.mean(clean_accuracy)}')
         print(f'Noise Accuracy: {np.mean(noise_accuracy)}')
@@ -203,12 +203,12 @@ def construct_dataset(dataset,
     save_path = get_adv_dataset_path(dataset, attack, net_type, classifier_id=classifier_id)
     save_path.parent.mkdir(exist_ok=True, parents=True)
     np.savez(save_path,
-             clean_train=clean[0],
-             clean_test=clean[1],
-             adv_train=adv[0],
-             adv_test=adv[1],
-             noise_train=noise[0],
-             noise_test=noise[1])
+             clean_train=clean_arr[0],
+             clean_test=clean_arr[1],
+             adv_train=adv_arr[0],
+             adv_test=adv_arr[1],
+             noise_train=noise_arr[0],
+             noise_test=noise_arr[1])
 
 
 def get_adv_dataset_path(dataset, attack, net_type, classifier_id=None):

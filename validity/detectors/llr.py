@@ -137,6 +137,7 @@ def train_llr_ood(in_dataset,
     torch.cuda.set_device(cuda_idx)
 
     detector = LikelihoodRatioDetector(foreground_path, background_path)
+    detector.cuda()
 
     # load datasets
     _, _, in_ood_train_ds, in_test_ds = load_detector_datasets(in_dataset, data_root=data_root)
@@ -158,7 +159,7 @@ def train_llr_ood(in_dataset,
 
     save_path = get_llr_path(in_dataset, out_dataset, mutation_rate, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(detector, save_path)
+    torch.save(detector.get_args(), save_path)
 
     for result_name, result in results.items():
         if type(result) in [dict, tuple, list]:

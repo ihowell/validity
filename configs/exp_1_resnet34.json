@@ -1,0 +1,19 @@
+{
+    "in_dataset": "mnist",
+    "out_dataset": "fmnist",
+    "additional_out_datasets": [
+        "gray-svhn",
+        "gray-cifar10"
+    ],
+    "classifier": {
+        "type": "resnet34",
+        "train_kwargs": {
+            "tensorboard_path": "tensorboard/resnet/cls_mnist_cls_resnet34_mnist"
+        }
+    },
+    "adv_attacks": [
+        "fgsm",
+        "bim",
+        "cwl2"
+    ]
+}

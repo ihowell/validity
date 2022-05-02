@@ -69,18 +69,21 @@ class ODINDetector(nn.Module):
         score = self.sc.transform(score)
         return -self.lr.predict_proba(score) + 1.
 
-    def train(self, in_loader, out_loader):
+    def train(self, in_loader, out_loader, train_prop=0.8):
         score_in = []
         for data, _ in tqdm(in_loader, desc='Test in loader'):
             score_in.append(self.score(data))
         score_in = np.concatenate(score_in)
-        val_score_in, test_score_in = score_in[:1000], score_in[1000:]
 
         score_out = []
         for data, _ in tqdm(out_loader, desc='Test out loader'):
             score_out.append(self.score(data))
         score_out = np.concatenate(score_out)
-        val_score_out, test_score_out = score_out[:1000], score_out[1000:]
+
+        n = min(score_in.shape[0], score_out.shape[0])
+        train_n = int(train_prop * n)
+        val_score_in, test_score_in = score_in[:train_n], score_in[train_n:n]
+        val_score_out, test_score_out = score_out[:train_n], score_out[train_n:n]
 
         val_scores = np.concatenate([val_score_in, val_score_out])
         test_scores = np.concatenate([test_score_in, test_score_out])
@@ -157,6 +160,8 @@ def train_odin(in_dataset,
 
     _, _, in_val_ds, _ = load_detector_datasets(in_dataset, data_root=data_root)
     _, _, out_val_ds, _ = load_detector_datasets(out_dataset, data_root=data_root)
+    print(f'{len(in_val_ds)=}')
+    print(f'{len(out_val_ds)=}')
     in_val_loader = torch.utils.data.DataLoader(in_val_ds, batch_size=64, shuffle=True)
     out_val_loader = torch.utils.data.DataLoader(out_val_ds, batch_size=64, shuffle=True)
 

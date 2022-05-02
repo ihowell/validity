@@ -42,17 +42,19 @@ def c_func(executor):
 
 def c_adv_dataset(executor):
 
-    def thunk(dataset, adv_attack, net_type, cls_path, id=None):
-        if adv_dataset_exists(dataset, adv_attack, dataset, id=id):
-            print(f'Found cached adv dataset {dataset} {adv_attack} {net_type} {id}')
+    def thunk(dataset, adv_attack, net_type, cls_path, classifier_id=None):
+        if adv_dataset_exists(dataset, adv_attack, dataset, classifier_id=classifier_id):
+            print(
+                f'Found cached adv dataset {dataset} {adv_attack} {net_type} {classifier_id}')
         else:
-            print(f'Constructing adv dataset {dataset} {adv_attack} {net_type} {id}')
+            print(
+                f'Constructing adv dataset {dataset} {adv_attack} {net_type} {classifier_id}')
             return executor.submit(construct_adv_dataset,
                                    dataset,
                                    adv_attack,
                                    net_type,
                                    cls_path,
-                                   id=id)
+                                   classifier_id=classifier_id)
 
     return thunk
 
@@ -103,7 +105,7 @@ def run_experiment(cfg_file, high_performance=False):
     with open(cfg_file) as f:
         cfg = json.load(f)
 
-    executor = get_executor()
+    executor = get_executor(cfg.get('local', False))
     cache_func = c_func(executor)
     cache_adv_ds = c_adv_dataset(executor)
 
@@ -159,7 +161,7 @@ def run_experiment(cfg_file, high_performance=False):
                                  adv_attack,
                                  cls_cfg['type'],
                                  cls_path,
-                                 id=cls_cfg['name']))
+                                 classifier_id=cls_cfg['name']))
     [job.result() for job in jobs if job]
 
     # Train OOD detectors
@@ -199,7 +201,7 @@ def run_experiment(cfg_file, high_performance=False):
                            out_dataset,
                            cls_type,
                            cls_path,
-                           id=id))
+                           classifier_id=id))
     [job.result() for job in jobs if job]
 
     # Train ADV detectors
@@ -239,7 +241,7 @@ def run_experiment(cfg_file, high_performance=False):
                                cls_type,
                                cls_path,
                                adv_attack,
-                               id=id))
+                               classifier_id=id))
     [job.result() for job in jobs if job]
 
     # Encode datasets

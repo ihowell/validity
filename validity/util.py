@@ -4,8 +4,9 @@ import submitit
 import torch
 
 
-def get_executor():
-    executor = submitit.AutoExecutor(folder='logs')
+def get_executor(local=False):
+    cluster = 'debug' if local else None
+    executor = submitit.AutoExecutor(folder='logs', cluster=cluster)
     executor.update_parameters(timeout_min=7 * 24 * 60,
                                gpus_per_node=1,
                                tasks_per_node=1,

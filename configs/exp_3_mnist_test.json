@@ -1,4 +1,5 @@
 {
+    "local": true,
     "in_dataset": "mnist",
     "out_dataset": "fmnist",
     "additional_out_datasets": [],
@@ -9,17 +10,6 @@
             "train_kwargs": {
                 "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_base",
                 "max_epochs": 3
-            }
-        },
-        {
-            "name": "spectral_norm",
-            "type": "mnist",
-            "cls_kwargs": {
-                "spectral_normalization": true
-            },
-            "train_kwargs": {
-                "max_epochs": 3,
-                "tensorboard_path": "tensorboard/classifiers/cls_mnist_mnist_spectral_norm"
             }
         }
     ],

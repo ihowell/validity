@@ -1,28 +1,17 @@
 import math
-import inspect
-import time
-import sys
-import json
-from pathlib import Path
-
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 import fire
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
-import torch.distributions as dist
 import numpy as np
-from torchvision import datasets, transforms
 from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
 
 from validity.classifiers.load import load_cls
 from validity.datasets import load_datasets
-from validity.generators.load import load_gen, load_encoded_ds
-from validity.util import ZipDataset, get_executor
+from validity.generators.load import load_gen
 
 IMPROVE_EPS = 5e-3
 
@@ -185,7 +174,7 @@ def run_am(dataset,
     classifier = load_cls(classifier_weights_path)
     classifier.eval()
 
-    generator = load_gen(generator_net_type, generator_weights_path, dataset)
+    generator = load_gen(generator_weights_path)
     generator.eval()
 
     load_itr = iter(loader)

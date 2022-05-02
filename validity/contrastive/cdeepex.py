@@ -513,7 +513,7 @@ def run_cdeepex(dataset,
     classifier = load_cls(classifier_weights_path)
     classifier.eval()
 
-    generator = load_gen(generator_net_type, generator_weights_path, dataset)
+    generator = load_gen(generator_weights_path)
     generator.eval()
 
     data = [data for _, data in zip(range(total_data), test_ds)]

@@ -1,5 +1,6 @@
 import pathlib
 from pkgutil import get_data
+from sklearn.decomposition import PCA
 
 import torch
 import torch.nn as nn
@@ -122,42 +123,38 @@ class MahalanobisDetector(nn.Module):
             print('Scoring noise')
             Mahalanobis_noise = self.score_for_loader(noise_loader)
 
-        # Create train/validation and test sets
-        val_size = int(Mahalanobis_in.shape[0] * 0.1)
-        Mahalanobis_in_val, Mahalanobis_in_test = \
-            Mahalanobis_in[:val_size], Mahalanobis_in[val_size:]
-        Mahalanobis_out_val, Mahalanobis_out_test = \
-            Mahalanobis_out[:val_size], Mahalanobis_out[val_size:]
+        Mahalanobis_train = np.concatenate([Mahalanobis_in, Mahalanobis_out])
+        labels = np.concatenate(
+            [np.ones(Mahalanobis_in.shape[0]),
+             np.zeros(Mahalanobis_out.shape[0])])
         if noise_loader:
-            Mahalanobis_noise_val, Mahalanobis_noise_test = \
-                Mahalanobis_noise[:val_size], Mahalanobis_noise[val_size:]
-
-        Mahalanobis_val = np.concatenate([Mahalanobis_in_val, Mahalanobis_out_val])
-        Mahalanobis_test = np.concatenate([Mahalanobis_in_test, Mahalanobis_out_test])
-        labels_val = np.concatenate(
-            [np.ones(Mahalanobis_in_val.shape[0]),
-             np.zeros(Mahalanobis_out_val.shape[0])])
-        labels_test = np.concatenate(
-            [np.ones(Mahalanobis_in_test.shape[0]),
-             np.zeros(Mahalanobis_out_test.shape[0])])
-        if noise_loader:
-            Mahalanobis_val = np.concatenate([Mahalanobis_val, Mahalanobis_noise_val])
-            Mahalanobis_test = np.concatenate([Mahalanobis_test, Mahalanobis_noise_test])
-            labels_val = np.concatenate([labels_val, np.ones(Mahalanobis_noise_val.shape[0])])
-            labels_test = np.concatenate(
-                [labels_test, np.ones(Mahalanobis_noise_test.shape[0])])
+            Mahalanobis_train = np.concatenate([Mahalanobis_train, Mahalanobis_noise])
+            labels = np.concatenate([labels, np.ones(Mahalanobis_noise.shape[0])])
 
         self.sc = StandardScaler()
-        scaled_data_val = self.sc.fit_transform(Mahalanobis_val)
-        scaled_data_test = self.sc.transform(Mahalanobis_test)
+        scaled_data_val = self.sc.fit_transform(Mahalanobis_train)
 
         # Train regressor
         print('Training regressor')
-        self.lr = LogisticRegressionCV(n_jobs=-1).fit(scaled_data_val, labels_val)
-        print(f'{self.lr.get_params()=}')
+        self.lr = LogisticRegressionCV(n_jobs=-1).fit(scaled_data_val, labels)
 
-        # Evaluate regressor
+    def evaluate(self, in_test_loader, out_test_loader, noise_test_loader=None):
         print('Evaluating regressor')
+        Mahalanobis_in = self.score_for_loader(in_test_loader)
+        Mahalanobis_out = self.score_for_loader(out_test_loader)
+        if noise_test_loader:
+            Mahalanobis_noise = self.score_for_loader(noise_test_loader)
+
+        Mahalanobis_test = np.concatenate([Mahalanobis_in, Mahalanobis_out])
+        labels_test = np.concatenate(
+            [np.ones(Mahalanobis_in.shape[0]),
+             np.zeros(Mahalanobis_out.shape[0])])
+        if noise_test_loader:
+            Mahalanobis_test = np.concatenate([Mahalanobis_test, Mahalanobis_noise])
+            labels_test = np.concatenate([labels_test, np.ones(Mahalanobis_noise.shape[0])])
+
+        scaled_data_test = self.sc.transform(Mahalanobis_test)
+
         res = {}
         test_probs = self.lr.predict_proba(scaled_data_test)[:, 1]
         preds = self.lr.predict(scaled_data_test)
@@ -175,6 +172,10 @@ class MahalanobisDetector(nn.Module):
         return res
 
     def score_for_loader(self, data_loader):
+        self.classifier.eval()
+        if self.num_outputs is None:
+            self.set_num_outputs(next(iter(data_loader))[0])
+
         Mahalanobis = []
         for layer_idx in range(self.num_outputs):
             M = np.concatenate([self.score(data, layer_idx) for data, _ in data_loader])
@@ -183,6 +184,10 @@ class MahalanobisDetector(nn.Module):
         return Mahalanobis
 
     def score(self, data, layer_index):
+        self.classifier.eval()
+        if self.num_outputs is None:
+            self.set_num_outputs(data)
+
         data = data.cuda()
         data.requires_grad = True
 
@@ -235,6 +240,7 @@ class MahalanobisDetector(nn.Module):
         """
         The estimates of mean and precision are generated using the same dataset that trained the classifier
         """
+        print('Sampling training set statistics')
         self.classifier.eval()
         if self.num_outputs is None:
             self.set_num_outputs(next(iter(in_train_loader))[0])
@@ -329,16 +335,19 @@ def train_mahalanobis_ood(in_dataset,
                                    num_classes=ds_info.num_labels,
                                    noise_magnitude=magnitude)
 
-    cls_train_ds, _, in_val_ds, _ = load_detector_datasets(in_dataset, data_root=data_root)
+    cls_train_ds, _, in_val_ds, in_test_ds = load_detector_datasets(in_dataset,
+                                                                    data_root=data_root)
+    _, _, out_val_ds, out_test_ds = load_detector_datasets(out_dataset)
+
     cls_train_loader = torch.utils.data.DataLoader(cls_train_ds, batch_size=64, shuffle=True)
-
-    print('Calculating sample statistics')
-    detector.sample_estimator(cls_train_loader)
-
     in_val_loader = torch.utils.data.DataLoader(in_val_ds, batch_size=64, shuffle=True)
-    _, _, out_val_ds, _ = load_detector_datasets(out_dataset)
     out_val_loader = torch.utils.data.DataLoader(out_val_ds, batch_size=64, shuffle=True)
-    results = detector.validate(in_val_loader, out_val_loader)
+    in_test_loader = torch.utils.data.DataLoader(in_test_ds, batch_size=64, shuffle=True)
+    out_test_loader = torch.utils.data.DataLoader(out_test_ds, batch_size=64, shuffle=True)
+
+    detector.sample_estimator(cls_train_loader)
+    detector.validate(in_val_loader, out_val_loader)
+    results = detector.evaluate(in_test_loader, out_test_loader)
 
     save_path = get_mahalanobis_ood_path(net_type,
                                          in_dataset,
@@ -382,9 +391,9 @@ def train_mahalanobis_adv(dataset,
     ds_info = get_dataset_info(dataset)
 
     data_dict = load_adv_datasets(dataset, adv_attack, net_type, classifier_id=classifier_id)
-    clean_val_data = data_dict['clean'][0]
-    adv_val_data = data_dict['adv'][0]
-    noise_val_data = data_dict['noise'][0]
+    clean_val_data, clean_test_data = data_dict['clean']
+    adv_val_data, adv_test_data = data_dict['adv']
+    noise_val_data, noise_test_data = data_dict['noise']
 
     detector = MahalanobisDetector(classifier_path=weights_path,
                                    num_classes=ds_info.num_labels,
@@ -395,14 +404,16 @@ def train_mahalanobis_adv(dataset,
                                                    batch_size=batch_size,
                                                    shuffle=False)
 
-    print('Calculating sample statistics')
-    detector.sample_estimator(cls_train_loader)
-
     in_val_loader = np_loader(clean_val_data, True)
-    out_val_loader = np_loader(adv_val_data, False)
+    adv_val_loader = np_loader(adv_val_data, False)
     noise_val_loader = np_loader(noise_val_data, True)
+    in_test_loader = np_loader(clean_test_data, True)
+    adv_test_loader = np_loader(adv_test_data, False)
+    noise_test_loader = np_loader(noise_test_data, True)
 
-    results = detector.validate(in_val_loader, out_val_loader, noise_val_loader)
+    detector.sample_estimator(cls_train_loader)
+    detector.validate(in_val_loader, adv_val_loader, noise_val_loader)
+    results = detector.evaluate(in_test_loader, adv_test_loader, noise_test_loader)
 
     save_path = get_mahalanobis_adv_path(net_type,
                                          dataset,
@@ -440,7 +451,7 @@ def train_multiple_mahalanobis_ood(in_dataset,
                                    latex_print=False,
                                    classifier_id=None):
     magnitudes = [0, 0.0005, 0.001, 0.0014, 0.002, 0.0024, 0.005, 0.01, 0.05, 0.1, 0.2]
-    result_table = [['Magnitude', 'AUC Score', 'FPR at TPR=0.95']]
+    result_table = [['Magnitude', 'Accuracy', 'AUC Score', 'FPR at TPR=0.95']]
 
     best_detector = None
     best_auc = None
@@ -456,7 +467,7 @@ def train_multiple_mahalanobis_ood(in_dataset,
                                               classifier_id=classifier_id)
         fpr, tpr = res['plot']
         plt.plot(fpr, tpr, label=str(magnitude))
-        row = [magnitude, res['auc_score'], res['fpr_at_tpr_95']]
+        row = [magnitude, res['accuracy'], res['auc_score'], res['fpr_at_tpr_95']]
         result_table.append(row)
 
         if best_detector is None:
@@ -496,12 +507,11 @@ def train_multiple_mahalanobis_adv(dataset,
                                    net_type,
                                    weights_path,
                                    adv_attack,
-                                   data_root='./datasets/',
                                    cuda_idx=0,
                                    latex_print=False,
                                    classifier_id=None):
     magnitudes = [0, 0.0005, 0.001, 0.0014, 0.002, 0.0028, 0.005, 0.01]
-    result_table = [['Magnitude', 'AUC Score', 'FPR at TPR=0.95']]
+    result_table = [['Magnitude', 'Accuracy', 'AUC Score', 'FPR at TPR=0.95']]
 
     best_detector = None
     best_auc = None
@@ -511,13 +521,12 @@ def train_multiple_mahalanobis_adv(dataset,
                                               net_type,
                                               weights_path,
                                               adv_attack,
-                                              data_root=data_root,
                                               cuda_idx=cuda_idx,
                                               magnitude=magnitude,
                                               classifier_id=classifier_id)
         fpr, tpr = res['plot']
         plt.plot(fpr, tpr, label=str(magnitude))
-        row = [magnitude, res['auc_score'], res['fpr_at_tpr_95']]
+        row = [magnitude, res['accuracy'], res['auc_score'], res['fpr_at_tpr_95']]
         result_table.append(row)
 
         if best_detector is None:

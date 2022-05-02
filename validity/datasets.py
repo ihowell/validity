@@ -3,7 +3,7 @@ from collections import namedtuple
 import torch
 from torchvision import datasets, transforms
 
-DatasetInfo = namedtuple('DatasetInfo', ['num_labels', 'num_output_channels'])
+DatasetInfo = namedtuple('DatasetInfo', ['num_labels', 'num_channels'])
 
 
 class Binarize(object):
@@ -24,12 +24,23 @@ def _bin_transforms():
     ])
 
 
+def _gray_transforms():
+    return transforms.Compose(
+        [transforms.ToTensor(),
+         transforms.Grayscale(),
+         transforms.CenterCrop((28, 28))])
+
+
 def get_dataset_info(dataset):
     if dataset == 'mnist':
         return DatasetInfo(10, 1)
     elif dataset == 'fmnist':
         return DatasetInfo(10, 1)
     elif dataset == 'cifar10':
+        return DatasetInfo(10, 3)
+    elif dataset == 'gray-cifar10':
+        return DatasetInfo(10, 3)
+    elif dataset == 'gray-svhn':
         return DatasetInfo(10, 3)
     else:
         raise Exception(f'get_dataset_info recieved unknown dataset: {dataset}')
@@ -102,6 +113,15 @@ def load_datasets(dataset, data_root='./datasets'):
                                    train=False,
                                    download=True,
                                    transform=transforms.ToTensor())
+    elif dataset == 'gray-cifar10':
+        train_ds = datasets.CIFAR10(root=data_root,
+                                    train=True,
+                                    download=True,
+                                    transform=_gray_transforms())
+        test_ds = datasets.CIFAR10(root=data_root,
+                                   train=False,
+                                   download=True,
+                                   transform=_gray_transforms())
     elif dataset == 'svhn':
         train_ds = datasets.SVHN(root=data_root,
                                  split='train',
@@ -111,6 +131,16 @@ def load_datasets(dataset, data_root='./datasets'):
                                 split='test',
                                 download=True,
                                 transform=transforms.ToTensor())
+    elif dataset == 'gray-svhn':
+        train_ds = datasets.SVHN(root=data_root,
+                                 split='train',
+                                 download=True,
+                                 transform=_gray_transforms())
+        test_ds = datasets.SVHN(root=data_root,
+                                split='test',
+                                download=True,
+                                transform=_gray_transforms())
+
     else:
         raise Exception(f'Attempted to load unknown dataset: {dataset}')
 

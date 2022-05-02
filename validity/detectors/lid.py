@@ -220,7 +220,7 @@ def mle_batch(data, batch, k):
     batch = np.asarray(batch, dtype=np.float32)
 
     k = min(k, len(data) - 1)
-    f = lambda v: -k / np.sum(np.log(v / v[-1]))
+    f = lambda v: -k / (np.sum(np.log(v / v[-1])) + 1e-8)
     a = cdist(batch, data)
     a = np.apply_along_axis(np.sort, axis=1, arr=a)[:, 1:k + 1]
     a = np.apply_along_axis(f, axis=1, arr=a)
@@ -249,12 +249,12 @@ def train_lid_adv(dataset,
     in_train_loader = np_loader(clean_train, True)
     out_train_loader = np_loader(adv_train, False)
     noise_train_loader = np_loader(noise_train, True)
-    detector.traiin(in_train_loader, out_train_loader, noise_train_loader)
+    detector.train(in_train_loader, out_train_loader, noise_train_loader)
 
     in_test_loader = np_loader(clean_test, True)
     out_test_loader = np_loader(adv_test, False)
     noise_test_loader = np_loader(noise_test, True)
-    results = detector.traiin(in_test_loader, out_test_loader, noise_test_loader)
+    results = detector.evaluate(in_test_loader, out_test_loader, noise_test_loader)
 
     save_path = get_lid_path(net_type, dataset, adv_attack, k, id=id)
     save_path.parent.mkdir(parents=True, exist_ok=True)

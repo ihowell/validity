@@ -21,7 +21,8 @@ from torch.nn.parameter import Parameter
 import torch.optim as optim
 import numpy as np
 
-from validity.classifiers.train import train
+from validity.classifiers.train import train_ds
+from validity.datasets import get_dataset_info
 
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -171,6 +172,7 @@ class ResNet(nn.Module):
     def __init__(self, block_name, num_blocks, num_classes=10, in_channels=3):
         super(ResNet, self).__init__()
         self.block_name = block_name
+        self.num_blocks = num_blocks
         self.num_classes = num_classes
         self.in_channels = in_channels
         block = get_block_cls(block_name)
@@ -334,26 +336,16 @@ def test():
 #     print('accuracy', np.mean(acc))
 
 
-def train_network(dataset,
-                  net_type,
-                  max_epochs=1000,
-                  data_root='./datasets/',
-                  cuda_idx=0,
-                  batch_size=64,
-                  id=None):
-    if dataset == 'mnist':
-        num_labels = 10
-        in_channels = 1
-    elif dataset == 'cifar10':
-        num_labels = 10
-        in_channels = 3
+def train_network(dataset, net_type, id=None, **kwargs):
+    ds_info = get_dataset_info(dataset)
 
     if net_type == 'resnet18':
-        net = ResNet18(num_labels, in_channels)
+        net = ResNet18
     elif net_type == 'resnet34':
-        net = ResNet34(num_labels, in_channels)
+        net = ResNet34
     elif net_type == 'resnet50':
-        net = ResNet50(num_labels, in_channels)
+        net = ResNet50
+    net = net(ds_info.num_labels, ds_info.num_channels)
     net = net.cuda()
     net.train()
 
@@ -361,9 +353,9 @@ def train_network(dataset,
     if id:
         name = f'{name}_{id}'
     net_path = Path(f'models/{name}.pt')
-    tb_path = f'tensorboard/resnet/{name}'
+    tensorboard_path = f'tensorboard/resnet/{name}'
 
-    train(net, net_path, dataset, batch_size, tb_path=tb_path)
+    train_ds(net, net_path, dataset, tensorboard_path=tensorboard_path, **kwargs)
 
 
 if __name__ == '__main__':
