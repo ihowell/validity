@@ -23,7 +23,7 @@ class WGAN_GP(nn.Module):
     @classmethod
     def load(cls, saved_dict):
         wgan_gp = cls(**saved_dict['args'])
-        wgan_gp.load_state_dict(saved_dict['state'])
+        wgan_gp.load_state_dict(saved_dict['state_dict'])
         return wgan_gp
 
     def __init__(self, critic_iter=5, lambda_term=10, num_channels=3):
