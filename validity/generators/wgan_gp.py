@@ -30,6 +30,7 @@ class WGAN_GP(nn.Module):
         super().__init__()
         self.critic_iter = critic_iter
         self.lambda_term = lambda_term
+        self.num_channels = num_channels
 
         self.generator = nn.Sequential(
             nn.Linear(128, 4 * 4 * 256),
@@ -65,6 +66,7 @@ class WGAN_GP(nn.Module):
             'args': {
                 'critic_iter': self.critic_iter,
                 'lambda_term': self.lambda_term,
+                'num_channels': self.num_channels,
             },
             'type': 'wgan_gp',
             'state_dict': self.state_dict()
