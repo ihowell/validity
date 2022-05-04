@@ -28,8 +28,9 @@ def cdeepex(generator,
             batch_size=None,
             writer=None,
             z_init=None,
-            inner_patience=100,
-            outer_iters=10000,
+            inner_patience=50,
+            max_inner_iters=250,
+            outer_iters=4000,
             tb_writer=None,
             strategy=None,
             seed=None,
@@ -199,7 +200,8 @@ def cdeepex(generator,
         best_z = torch.where((loss < improved_loss).unsqueeze(-1), z, best_z).detach()
         best_loss = torch.where(loss < improved_loss, loss, best_loss).detach()
 
-        updates = steps_since_best_loss >= inner_patience
+        updates = torch.logical_or(steps_since_best_loss >= inner_patience,
+                                   inner_steps >= max_inner_iters)
 
         # updates = grad_norm < grad_eps
 
