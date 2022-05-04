@@ -368,7 +368,7 @@ def _evaluate(cfg):
             cls_type = cls_cfg['type']
             id = cls_cfg['name']
             cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
-            print(f'\n\nResults for {id}:')
+            out_file.write(f'\n\nResults for {id}:')
 
             results = {}
             for contrastive_method in cfg['contrastive_methods']:
@@ -415,8 +415,8 @@ def _evaluate(cfg):
                             results[contrastive_method][
                                 gen_cfg['type']][adv_attack] = json.load(in_file)
 
-        _grid_output(out_file, cfg['adv_attacks'], cfg['contrastive_methods'],
-                     cfg['generators'], results)
+            _grid_output(out_file, cfg['adv_attacks'], cfg['contrastive_methods'],
+                         cfg['generators'], results)
 
 
 def _grid_output(fp, adv_attacks, contrastive_methods, generators, results):
