@@ -414,6 +414,7 @@ def cdeepex(generator,
 
             n = z.size(0)
 
+    print('Completed all examples')
     res = torch.stack(z_res)
     decoded = []
     for i in range(math.ceil(res.size(0) / batch_size)):

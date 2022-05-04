@@ -243,8 +243,7 @@ def test_encode(gan_path, batch_size=64, data_root='./datasets/', cuda_idx=0, se
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
-    gan = WGAN_GP()
-    gan.load_state_dict(torch.load(gan_path, map_location=f'cuda:{cuda_idx}'))
+    gan = WGAN_GP.load(torch.load(gan_path, map_location=f'cuda:{cuda_idx}'))
     gan = gan.cuda()
     gan.eval()
 
@@ -306,7 +305,8 @@ def _encode_dataset_job(dataset,
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
-    gan = WGAN_GP.load(gan_path)
+    save_dict = torch.load(gan_path)
+    gan = WGAN_GP.load(save_dict)
     gan = gan.cuda()
     gan.eval()
 
