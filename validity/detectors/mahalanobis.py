@@ -195,8 +195,10 @@ class MahalanobisDetector(nn.Module):
         out_features = out_features.view(out_features.size(0), out_features.size(1), -1)
         out_features = torch.mean(out_features, 2)
 
-        sample_mean = self.sample_mean.to(device=out_features.get_device())
-        precision = self.precision.to(device=out_features.get_device())
+        sample_mean = [
+            s_mean.to(device=out_features.get_device()) for s_mean in self.sample_mean
+        ]
+        precision = [p.to(device=out_features.get_device()) for p in self.precision]
 
         # compute Mahalanobis score
         gaussian_score = []
