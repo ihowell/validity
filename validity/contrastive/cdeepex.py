@@ -316,9 +316,9 @@ def cdeepex(generator,
                 torch.tensor(0.).cuda())
             steps_under_threshold = torch.where(updates, updated_steps, steps_under_threshold)
 
-            to_remove = torch.logical_and(
-                torch.logical_or(steps_under_threshold >= del_x_patience,
-                                 outer_steps >= outer_iters), c >= min_c)
+            to_remove = torch.logical_or(
+                torch.logical_and(steps_under_threshold >= del_x_patience, c >= min_c),
+                outer_steps >= outer_iters)
 
             idx_to_remove = torch.where(torch.logical_or(is_feasible, to_remove))[0]
 
