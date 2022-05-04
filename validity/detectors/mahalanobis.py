@@ -199,7 +199,7 @@ class MahalanobisDetector(nn.Module):
         gaussian_score = []
         for i in range(self.num_classes):
             batch_sample_mean = self.sample_mean[layer_index][i]
-            zero_f = out_features.data - batch_sample_mean
+            zero_f = out_features.data - batch_sample_mean.to(device=out_features.get_device())
             term_gau = -0.5 * torch.mm(torch.mm(zero_f, self.precision[layer_index]),
                                        zero_f.t()).diag()
             gaussian_score.append(term_gau.view(-1, 1))
