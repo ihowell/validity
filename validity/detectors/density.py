@@ -204,7 +204,7 @@ def load_density_adv(net_type, dataset, adv_attack, id=None):
     save_path = get_density_path(net_type, dataset, adv_attack, id=id)
     if not save_path.exists():
         return False
-    save_dict = torch.load(save_path)
+    save_dict = torch.load(save_path, map_location=torch.device('cpu'))
     return DensityDetector.load(save_dict)
 
 

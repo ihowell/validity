@@ -287,7 +287,7 @@ def load_odin(net_type, in_dataset, out_dataset, magnitude, temperature, id=None
                               temperature,
                               id=None)
     assert save_path.exists(), f'{save_path} does not exist'
-    save_dict = torch.load(save_path)
+    save_dict = torch.load(save_path, map_location=torch.device('cpu'))
     return ODINDetector.load(save_dict)
 
 
@@ -302,7 +302,7 @@ def load_best_odin(net_type, in_dataset, out_dataset, id=None):
     save_path = get_best_odin_path(net_type, in_dataset, out_dataset, id=id)
     if not save_path.exists():
         return False
-    save_dict = torch.load(save_path)
+    save_dict = torch.load(save_path, map_location=torch.device('cpu'))
     return ODINDetector.load(save_dict)
 
 

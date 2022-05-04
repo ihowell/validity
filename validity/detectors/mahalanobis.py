@@ -620,7 +620,7 @@ def load_mahalanobis_ood(net_type, in_dataset, out_dataset, magnitude, classifie
                                          classifier_id=classifier_id)
     if not save_path.exists():
         return False
-    save_dict = torch.load(save_path)
+    save_dict = torch.load(save_path, map_location=torch.device('cpu'))
     return MahalanobisDetector.load(save_dict)
 
 
@@ -631,7 +631,7 @@ def load_best_mahalanobis_ood(net_type, in_dataset, out_dataset, classifier_id=N
                                               classifier_id=classifier_id)
     if not save_path.exists():
         return False
-    save_dict = torch.load(save_path)
+    save_dict = torch.load(save_path, map_location=torch.device('cpu'))
     return MahalanobisDetector.load(save_dict)
 
 
@@ -643,7 +643,7 @@ def load_mahalanobis_adv(net_type, dataset, adv_attack, magnitude, classifier_id
                                          classifier_id=classifier_id)
     if not save_path.exists():
         return False
-    save_dict = torch.load(save_path)
+    save_dict = torch.load(save_path, map_location=torch.device('cpu'))
     return MahalanobisDetector.load(save_dict)
 
 
@@ -654,7 +654,7 @@ def load_best_mahalanobis_adv(net_type, dataset, adv_attack, classifier_id=None)
                                               classifier_id=classifier_id)
     if not save_path.exists():
         return False
-    save_dict = torch.load(save_path)
+    save_dict = torch.load(save_path, map_location=torch.device('cpu'))
     return MahalanobisDetector.load(save_dict)
 
 

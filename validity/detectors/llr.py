@@ -213,7 +213,7 @@ def load_llr(in_dataset, out_dataset, mutation_rate, id=None):
     save_path = get_llr_path(in_dataset, out_dataset, mutation_rate, id=id)
     if not save_path.exists():
         return False
-    saved_dict = torch.load(save_path)
+    saved_dict = torch.load(save_path, map_location=torch.device('cpu'))
     return LikelihoodRatioDetector.load(saved_dict)
 
 
@@ -221,7 +221,7 @@ def load_best_llr(in_dataset, out_dataset, id=None):
     save_path = get_best_llr_path(in_dataset, out_dataset, id=id)
     if not save_path.exists():
         return False
-    saved_dict = torch.load(save_path)
+    saved_dict = torch.load(save_path, map_location=torch.device('cpu'))
     return LikelihoodRatioDetector.load(saved_dict)
 
 

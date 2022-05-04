@@ -344,7 +344,7 @@ def load_lid(net_type, dataset, adv_attack, k, id=None):
     save_path = get_lid_path(net_type, dataset, adv_attack, k, id=id)
     if not save_path.exists():
         return None
-    save_dict = torch.load(save_path)
+    save_dict = torch.load(save_path, map_location=torch.device('cpu'))
     return LIDDetector.load(save_dict)
 
 
@@ -359,7 +359,7 @@ def load_best_lid(net_type, dataset, adv_attack, id=None):
     save_path = get_best_lid_path(net_type, dataset, adv_attack, id=id)
     if not save_path.exists():
         return False
-    save_dict = torch.load(save_path)
+    save_dict = torch.load(save_path, map_location=torch.device('cpu'))
     return LIDDetector.load(save_dict)
 
 
