@@ -40,7 +40,7 @@ def construct_cls(cls_type, dataset, cls_kwargs=None):
 
 
 def load_cls(weights_path):
-    saved_dict = torch.load(weights_path)
+    saved_dict = torch.load(weights_path, map_location=torch.device('cpu'))
     cls_type = saved_dict['type']
 
     if cls_type == 'mnist':
