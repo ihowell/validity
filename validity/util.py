@@ -15,7 +15,7 @@ def get_executor(local=False):
                                slurm_gres='gpu',
                                slurm_mem_per_cpu='16G',
                                slurm_array_parallelism=100,
-                               slurm_constraint='gpu_v100,gpu_p100')
+                               slurm_constraint='gpu_v100|gpu_p100')
     return executor
 
 
