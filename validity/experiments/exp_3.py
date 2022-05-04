@@ -355,62 +355,71 @@ def run_experiment(cfg_file, high_performance=False):
                                                        classifier_id=id,
                                                        subset=cfg['contrastive_subset'],
                                                        **cfg.get('contrastive_kwargs'))
+    job = executor.submit(_evaluate, cfg)
+    job.result()
 
+
+def _evaluate(cfg):
+    in_dataset = cfg['in_dataset']
+    out_dataset = cfg['out_dataset']
     # Evaluate contrastive examples
-    for cls_cfg in cfg['classifiers']:
-        cls_type = cls_cfg['type']
-        id = cls_cfg['name']
-        cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
-        print(f'\n\nResults for {id}:')
+    with open('data/results.txt', 'w') as out_file:
+        for cls_cfg in cfg['classifiers']:
+            cls_type = cls_cfg['type']
+            id = cls_cfg['name']
+            cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
+            print(f'\n\nResults for {id}:')
 
-        results = {}
-        for contrastive_method in cfg['contrastive_methods']:
-            results[contrastive_method] = {}
-            for gen_cfg in cfg['generators']:
-                results[contrastive_method][gen_cfg['type']] = {}
-                for adv_attack in cfg['adv_attacks']:
-                    contrastive_ds_path = get_contrastive_dataset_path(
-                        contrastive_method,
-                        in_dataset,
-                        cls_type,
-                        gen_cfg['type'],
-                        subset=cfg['contrastive_subset'],
-                        classifier_id=id)
-                    contrastive_res_path = get_eval_res_path(contrastive_method,
-                                                             cls_type,
-                                                             in_dataset,
-                                                             out_dataset,
-                                                             gen_cfg['type'],
-                                                             adv_attack,
-                                                             classifier_id=id,
-                                                             subset=cfg['contrastive_subset'])
-                    if not contrastive_res_path.exists():
-                        contrastive_res_path.parent.mkdir(parents=True, exist_ok=True)
-                        print(f'Evaluating:')
-                        print(
-                            f'Contrastive method: {contrastive_method} with {gen_cfg["type"]}')
-                        print(f'Adversarial attack: {adv_attack}')
-                        eval_contrastive_ds(contrastive_method,
-                                            contrastive_ds_path,
-                                            cls_type,
-                                            cls_path,
-                                            in_dataset,
-                                            out_dataset,
-                                            gen_cfg['type'],
-                                            adv_attack,
-                                            classifier_id=id,
-                                            subset=cfg['contrastive_subset'],
-                                            verbose=True)
+            results = {}
+            for contrastive_method in cfg['contrastive_methods']:
+                results[contrastive_method] = {}
+                for gen_cfg in cfg['generators']:
+                    results[contrastive_method][gen_cfg['type']] = {}
+                    for adv_attack in cfg['adv_attacks']:
+                        contrastive_ds_path = get_contrastive_dataset_path(
+                            contrastive_method,
+                            in_dataset,
+                            cls_type,
+                            gen_cfg['type'],
+                            subset=cfg['contrastive_subset'],
+                            classifier_id=id)
+                        contrastive_res_path = get_eval_res_path(
+                            contrastive_method,
+                            cls_type,
+                            in_dataset,
+                            out_dataset,
+                            gen_cfg['type'],
+                            adv_attack,
+                            classifier_id=id,
+                            subset=cfg['contrastive_subset'])
+                        if not contrastive_res_path.exists():
+                            contrastive_res_path.parent.mkdir(parents=True, exist_ok=True)
+                            print(f'Evaluating:')
+                            print(
+                                f'Contrastive method: {contrastive_method} with {gen_cfg["type"]}'
+                            )
+                            print(f'Adversarial attack: {adv_attack}')
+                            eval_contrastive_ds(contrastive_method,
+                                                contrastive_ds_path,
+                                                cls_type,
+                                                cls_path,
+                                                in_dataset,
+                                                out_dataset,
+                                                gen_cfg['type'],
+                                                adv_attack,
+                                                classifier_id=id,
+                                                subset=cfg['contrastive_subset'],
+                                                verbose=True)
 
-                    with open(contrastive_res_path) as in_file:
-                        results[contrastive_method][gen_cfg['type']][adv_attack] = json.load(
-                            in_file)
+                        with open(contrastive_res_path) as in_file:
+                            results[contrastive_method][
+                                gen_cfg['type']][adv_attack] = json.load(in_file)
 
-        _grid_output(cfg['adv_attacks'], cfg['contrastive_methods'], cfg['generators'],
-                     results)
+        _grid_output(out_file, cfg['adv_attacks'], cfg['contrastive_methods'],
+                     cfg['generators'], results)
 
 
-def _grid_output(adv_attacks, contrastive_methods, generators, results):
+def _grid_output(fp, adv_attacks, contrastive_methods, generators, results):
     headers = [['', 'Detectors', ''] +
                sum([[c + ' ' + g['type']] + [''] * 3
                     for (c, g) in product(contrastive_methods, generators)], []),
@@ -438,8 +447,8 @@ def _grid_output(adv_attacks, contrastive_methods, generators, results):
 
         table = table + rows
 
-    print('')
-    print(tabulate(table, tablefmt='tsv', floatfmt='.4f'))
+    fp.write('')
+    fp.write(tabulate(table, tablefmt='tsv', floatfmt='.4f'))
 
 
 def _long_table(adv_attacks, contrastive_methods, generators, results):
