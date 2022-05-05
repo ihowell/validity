@@ -43,7 +43,7 @@ def c_func(executor):
 def c_adv_dataset(executor):
 
     def thunk(dataset, adv_attack, net_type, cls_path, classifier_id=None):
-        if adv_dataset_exists(dataset, adv_attack, dataset, classifier_id=classifier_id):
+        if adv_dataset_exists(dataset, adv_attack, net_type, classifier_id=classifier_id):
             print(
                 f'Found cached adv dataset {dataset} {adv_attack} {net_type} {classifier_id}')
         else:
