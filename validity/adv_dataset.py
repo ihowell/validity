@@ -213,7 +213,6 @@ def construct_dataset(dataset,
 
 def get_adv_dataset_path(dataset, attack, net_type, classifier_id=None):
     data_root = pathlib.Path('adv_datasets')
-    data_root.mkdir(exist_ok=True, parents=True)
     file_name = f'{dataset}_{attack}_{net_type}'
     if classifier_id:
         file_name = f'{file_name}_{classifier_id}'
@@ -232,6 +231,9 @@ def load_adv_datasets(dataset, attack, net_type, classifier_id=None):
 
 def adv_dataset_exists(dataset, attack, net_type, classifier_id=None):
     save_path = get_adv_dataset_path(dataset, attack, net_type, classifier_id=classifier_id)
+    print(f'adv dataset path: ', dataset, attack, net_type, classifier_id=classifier_id)
+    print(save_path)
+    exit()
     return save_path.exists()
 
 
