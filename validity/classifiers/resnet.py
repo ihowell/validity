@@ -20,38 +20,47 @@ from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 import torch.optim as optim
 import numpy as np
+from torch.nn.utils.parametrizations import spectral_norm
 
 from validity.classifiers.train import train_ds
 from validity.datasets import get_dataset_info
 
 
-def conv3x3(in_planes, out_planes, stride=1):
-    return nn.Conv2d(in_planes,
+def conv3x3(in_planes, out_planes, stride=1, spectral_normalization=False):
+    conv = nn.Conv2d(in_planes,
                      out_planes,
                      kernel_size=3,
                      stride=stride,
                      padding=1,
                      bias=False)
+    if spectral_normalization:
+        conv = spectral_norm(conv)
+    return conv
 
 
 class BasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride=1):
+    def __init__(self, in_planes, planes, stride=1, spectral_normalization=False):
         super(BasicBlock, self).__init__()
-        self.conv1 = conv3x3(in_planes, planes, stride)
+        self.conv1 = conv3x3(in_planes,
+                             planes,
+                             stride,
+                             spectral_normalization=spectral_normalization)
         self.bn1 = nn.BatchNorm2d(planes)
-        self.conv2 = conv3x3(planes, planes)
+        self.conv2 = conv3x3(planes, planes, spectral_normalization=spectral_normalization)
         self.bn2 = nn.BatchNorm2d(planes)
 
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != self.expansion * planes:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_planes,
-                          self.expansion * planes,
-                          kernel_size=1,
-                          stride=stride,
-                          bias=False), nn.BatchNorm2d(self.expansion * planes))
+            conv = nn.Conv2d(in_planes,
+                             self.expansion * planes,
+                             kernel_size=1,
+                             stride=stride,
+                             bias=False), nn.BatchNorm2d(self.expansion * planes)
+            if spectral_normalization:
+                conv = spectral_norm(conv)
+            self.shortcut = nn.Sequential(conv)
 
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
@@ -65,20 +74,25 @@ class PreActBlock(nn.Module):
     '''Pre-activation version of the BasicBlock.'''
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride=1):
+    def __init__(self, in_planes, planes, stride=1, spectral_normalization=False):
         super(PreActBlock, self).__init__()
         self.bn1 = nn.BatchNorm2d(in_planes)
-        self.conv1 = conv3x3(in_planes, planes, stride)
+        self.conv1 = conv3x3(in_planes,
+                             planes,
+                             stride,
+                             spectral_normalization=spectral_normalization)
         self.bn2 = nn.BatchNorm2d(planes)
-        self.conv2 = conv3x3(planes, planes)
+        self.conv2 = conv3x3(planes, planes, spectral_normalization=spectral_normalization)
 
         if stride != 1 or in_planes != self.expansion * planes:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_planes,
-                          self.expansion * planes,
-                          kernel_size=1,
-                          stride=stride,
-                          bias=False))
+            conv = nn.Conv2d(in_planes,
+                             self.expansion * planes,
+                             kernel_size=1,
+                             stride=stride,
+                             bias=False)
+            if spectral_normalization:
+                conv = spectral_norm(conv)
+            self.shortcut = nn.Sequential(conv)
 
     def forward(self, x):
         out = F.relu(self.bn1(x))
@@ -92,28 +106,39 @@ class PreActBlock(nn.Module):
 class Bottleneck(nn.Module):
     expansion = 4
 
-    def __init__(self, in_planes, planes, stride=1):
+    def __init__(self, in_planes, planes, stride=1, spectral_normalization=False):
         super(Bottleneck, self).__init__()
-        self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=1, bias=False)
+        self.conv1 = nn.Conv2d(in_planes,
+                               planes,
+                               kernel_size=1,
+                               bias=False,
+                               spectral_normalization=spectral_normalization)
         self.bn1 = nn.BatchNorm2d(planes)
         self.conv2 = nn.Conv2d(planes,
                                planes,
                                kernel_size=3,
                                stride=stride,
                                padding=1,
-                               bias=False)
+                               bias=False,
+                               spectral_normalization=spectral_normalization)
         self.bn2 = nn.BatchNorm2d(planes)
-        self.conv3 = nn.Conv2d(planes, self.expansion * planes, kernel_size=1, bias=False)
+        self.conv3 = nn.Conv2d(planes,
+                               self.expansion * planes,
+                               kernel_size=1,
+                               bias=False,
+                               spectral_normalization=spectral_normalization)
         self.bn3 = nn.BatchNorm2d(self.expansion * planes)
 
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != self.expansion * planes:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_planes,
-                          self.expansion * planes,
-                          kernel_size=1,
-                          stride=stride,
-                          bias=False), nn.BatchNorm2d(self.expansion * planes))
+            conv = nn.Conv2d(in_planes,
+                             self.expansion * planes,
+                             kernel_size=1,
+                             stride=stride,
+                             bias=False), nn.BatchNorm2d(self.expansion * planes)
+            if spectral_normalization:
+                conv = spectral_norm(conv)
+            self.shortcut = nn.Sequential(conv)
 
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
@@ -128,27 +153,38 @@ class PreActBottleneck(nn.Module):
     '''Pre-activation version of the original Bottleneck module.'''
     expansion = 4
 
-    def __init__(self, in_planes, planes, stride=1):
+    def __init__(self, in_planes, planes, stride=1, spectral_normalization=False):
         super(PreActBottleneck, self).__init__()
         self.bn1 = nn.BatchNorm2d(in_planes)
-        self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=1, bias=False)
+        self.conv1 = nn.Conv2d(in_planes,
+                               planes,
+                               kernel_size=1,
+                               bias=False,
+                               spectral_normalization=spectral_normalization)
         self.bn2 = nn.BatchNorm2d(planes)
         self.conv2 = nn.Conv2d(planes,
                                planes,
                                kernel_size=3,
                                stride=stride,
                                padding=1,
-                               bias=False)
+                               bias=False,
+                               spectral_normalization=spectral_normalization)
         self.bn3 = nn.BatchNorm2d(planes)
-        self.conv3 = nn.Conv2d(planes, self.expansion * planes, kernel_size=1, bias=False)
+        self.conv3 = nn.Conv2d(planes,
+                               self.expansion * planes,
+                               kernel_size=1,
+                               bias=False,
+                               spectral_normalization=spectral_normalization)
 
         if stride != 1 or in_planes != self.expansion * planes:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_planes,
-                          self.expansion * planes,
-                          kernel_size=1,
-                          stride=stride,
-                          bias=False))
+            conv = nn.Conv2d(in_planes,
+                             self.expansion * planes,
+                             kernel_size=1,
+                             stride=stride,
+                             bias=False)
+            if spectral_normalization:
+                conv = spectral_norm(conv)
+            self.shortcut = nn.Sequential(conv)
 
     def forward(self, x):
         out = F.relu(self.bn1(x))
@@ -169,12 +205,18 @@ class ResNet(nn.Module):
         model.load_state_dict(saved_dict['state_dict'])
         return model
 
-    def __init__(self, block_name, num_blocks, num_classes=10, in_channels=3):
+    def __init__(self,
+                 block_name,
+                 num_blocks,
+                 num_classes=10,
+                 in_channels=3,
+                 spectral_normalization=False):
         super(ResNet, self).__init__()
         self.block_name = block_name
         self.num_blocks = num_blocks
         self.num_classes = num_classes
         self.in_channels = in_channels
+        self.spectral_normalization = spectral_normalization
         block = get_block_cls(block_name)
         self.in_planes = 64
 
@@ -192,14 +234,19 @@ class ResNet(nn.Module):
     def get_args(self):
         return ((self.block_name, self.num_blocks), {
             'num_classes': self.num_classes,
-            'in_channels': self.in_channels
+            'in_channels': self.in_channels,
+            'spectral_normalization': self.spectral_normalization,
         })
 
     def _make_layer(self, block, planes, num_blocks, stride):
         strides = [stride] + [1] * (num_blocks - 1)
         layers = []
         for stride in strides:
-            layers.append(block(self.in_planes, planes, stride))
+            layers.append(
+                block(self.in_planes,
+                      planes,
+                      stride,
+                      spectral_normalization=self.spectral_normalization))
             self.in_planes = planes * block.expansion
         return nn.Sequential(*layers)
 
@@ -275,16 +322,25 @@ def get_block_cls(block_name):
         raise Exception(f'Could not find block with name "{block_name}"')
 
 
-def ResNet18(num_c, in_ch):
-    return ResNet('pre_act', [2, 2, 2, 2], num_classes=num_c, in_channels=in_ch)
+def ResNet18(num_c, in_ch, spectral_normalization=False):
+    return ResNet('pre_act', [2, 2, 2, 2],
+                  num_classes=num_c,
+                  in_channels=in_ch,
+                  spectral_normalization=spectral_normalization)
 
 
-def ResNet34(num_c, in_ch):
-    return ResNet('basic', [3, 4, 6, 3], num_classes=num_c, in_channels=in_ch)
+def ResNet34(num_c, in_ch, spectral_normalization=False):
+    return ResNet('basic', [3, 4, 6, 3],
+                  num_classes=num_c,
+                  in_channels=in_ch,
+                  spectral_normalization=spectral_normalization)
 
 
-def ResNet50(num_c, in_ch):
-    return ResNet('bottleneck', [3, 4, 6, 3], num_classes=num_c, in_channels=in_ch)
+def ResNet50(num_c, in_ch, spectral_normalization=False):
+    return ResNet('bottleneck', [3, 4, 6, 3],
+                  num_classes=num_c,
+                  in_channels=in_ch,
+                  spectral_normalization=spectral_normalization)
 
 
 def ResNet101():
@@ -336,7 +392,7 @@ def test():
 #     print('accuracy', np.mean(acc))
 
 
-def train_network(dataset, net_type, id=None, **kwargs):
+def train_network(dataset, net_type, id=None, spectral_normalization=False, **kwargs):
     ds_info = get_dataset_info(dataset)
 
     if net_type == 'resnet18':
@@ -345,7 +401,9 @@ def train_network(dataset, net_type, id=None, **kwargs):
         net = ResNet34
     elif net_type == 'resnet50':
         net = ResNet50
-    net = net(ds_info.num_labels, ds_info.num_channels)
+    net = net(ds_info.num_labels,
+              ds_info.num_channels,
+              spectral_normalization=spectral_normalization)
     net = net.cuda()
     net.train()
 

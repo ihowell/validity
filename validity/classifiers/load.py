@@ -2,6 +2,8 @@ from pathlib import Path
 
 import torch
 
+from validity.datasets import get_dataset_info
+
 from .resnet import ResNet, ResNet18, ResNet34, ResNet50
 #from .densenet import *
 from .mnist import MnistClassifier
@@ -17,21 +19,17 @@ def get_cls_path(cls_type, dataset, id=None):
 def construct_cls(cls_type, dataset, cls_kwargs=None):
     if cls_kwargs is None:
         cls_kwargs = {}
-    if dataset == 'mnist':
-        num_labels = 10
-        in_channels = 1
-    elif dataset == 'cifar10':
-        num_labels = 10
-        in_channels = 3
+
+    ds_info = get_dataset_info(dataset)
 
     if cls_type == 'mnist':
         net = MnistClassifier(**cls_kwargs)
     elif cls_type == 'resnet18':
-        net = ResNet18(num_labels, in_channels, **cls_kwargs)
+        net = ResNet18(ds_info.num_labels, ds_info.num_channels, **cls_kwargs)
     elif cls_type == 'resnet34':
-        net = ResNet34(num_labels, in_channels, **cls_kwargs)
+        net = ResNet34(ds_info.num_labels, ds_info.num_channels, **cls_kwargs)
     elif cls_type == 'resnet50':
-        net = ResNet50(num_labels, in_channels, **cls_kwargs)
+        net = ResNet50(ds_info.num_labels, ds_info.num_channels, **cls_kwargs)
 
     else:
         raise Exception(f'Unknown classifier type {cls_type}')
