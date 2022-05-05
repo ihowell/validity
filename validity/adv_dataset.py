@@ -231,7 +231,7 @@ def load_adv_datasets(dataset, attack, net_type, classifier_id=None):
 
 def adv_dataset_exists(dataset, attack, net_type, classifier_id=None):
     save_path = get_adv_dataset_path(dataset, attack, net_type, classifier_id=classifier_id)
-    print(f'adv dataset path: ', dataset, attack, net_type, classifier_id=classifier_id)
+    print(f'adv dataset path: ', dataset, attack, net_type, classifier_id)
     print(save_path)
     exit()
     return save_path.exists()

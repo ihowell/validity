@@ -1,3 +1,4 @@
+import sys
 import fire
 import numpy as np
 import pathlib
@@ -18,6 +19,8 @@ def joint_ood_adv(net_type,
                   out_ds_names,
                   adv_attacks,
                   batch_size=64,
+                  classifier_id=None,
+                  fp=sys.stdout,
                   data_root='./datasets/'):
     """
     Assumpmtions:
@@ -37,7 +40,10 @@ def joint_ood_adv(net_type,
     # Load adversarial datasets
     adv_datasets = {}
     for adv_attack in adv_attacks:
-        data_dict = load_adv_datasets(in_ds_name, adv_attack, net_type)
+        data_dict = load_adv_datasets(in_ds_name,
+                                      adv_attack,
+                                      net_type,
+                                      classifier_id=classifier_id)
         adv_datasets[adv_attack] = data_dict['adv'][1]
 
     # Load OOD datasets
@@ -49,10 +55,14 @@ def joint_ood_adv(net_type,
                                                                shuffle=False)
 
     # Load detectors
-    ood_detectors = load_ood_detectors(net_type, in_ds_name, out_ds_names[0])
+    ood_detectors = load_ood_detectors(net_type,
+                                       in_ds_name,
+                                       out_ds_names[0],
+                                       classifier_id=classifier_id)
     adv_detectors = []
     for adv_attack in adv_attacks:
-        adv_detectors = adv_detectors + load_adv_detectors(net_type, in_ds_name, adv_attack)
+        adv_detectors = adv_detectors + load_adv_detectors(
+            net_type, in_ds_name, adv_attack, classifier_id=classifier_id)
 
     detectors = ood_detectors + adv_detectors
 
@@ -120,8 +130,8 @@ def joint_ood_adv(net_type,
         row = [detector_name] + row
         results.append(row)
 
-    print(tabulate(results, tablefmt='tsv'))
-    print('')
+    fp.write(tabulate(results, tablefmt='tsv'))
+    fp.write('')
     headers = ['OOD Method', 'Adv Method', in_ds_name
                ] + out_ds_names + adv_attacks + ['Combined']
 
@@ -158,7 +168,7 @@ def joint_ood_adv(net_type,
             row = [ood_method, adv_method] + [f'{x:.4f}' for x in accuracies]
             results.append(row)
 
-    print(tabulate(results, headers=headers, tablefmt='tsv', floatfmt='.4f'))
+    fp.write(tabulate(results, headers=headers, tablefmt='tsv', floatfmt='.4f'))
 
 
 if __name__ == '__main__':
