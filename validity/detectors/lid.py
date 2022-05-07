@@ -287,6 +287,7 @@ def train_multiple_lid_adv(dataset,
                            cuda_idx=0,
                            latex_print=False,
                            id=None):
+    print(f'Train multiple lid adv {dataset=} {net_type=} {weights_path=} {adv_attack=} {id=}')
     k_list = range(10, 100, 10)
     result_table = [['K', 'AUC Score', 'FPR at TPR=0.95']]
 
