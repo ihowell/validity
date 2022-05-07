@@ -58,7 +58,6 @@ class MahalanobisDetector(nn.Module):
 
         # Do not need to be saved to disk
         self.classifier = load_cls(self.classifier_path)
-        self.classifier.cuda()
         self.criterion = nn.CrossEntropyLoss()
 
         self.feature_list = None

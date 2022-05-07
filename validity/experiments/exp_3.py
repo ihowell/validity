@@ -11,7 +11,6 @@ from validity.adv_dataset import construct_dataset as construct_adv_dataset, \
 from validity.classifiers.load import load_cls, get_cls_path, construct_cls
 from validity.classifiers.train import train_ds
 from validity.contrastive.dataset import get_contrastive_dataset_path
-from validity.detectors.density import train_density_adv, get_density_path, DensityDetector
 from validity.detectors.lid import train_multiple_lid_adv, get_best_lid_path, LIDDetector
 from validity.detectors.llr import train_llr_ood, get_llr_path, LikelihoodRatioDetector
 from validity.detectors.odin import train_multiple_odin, get_best_odin_path, \
@@ -305,20 +304,11 @@ def run_experiment(cfg_file, high_performance=False):
             id = cls_cfg['name']
             cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
             for adv_attack in cfg['adv_attacks']:
-                density_path = get_density_path(cls_type, in_dataset, adv_attack, id=id)
                 lid_path = get_best_lid_path(cls_type, in_dataset, adv_attack, id=id)
                 mahalanobis_adv_path = get_best_mahalanobis_adv_path(cls_type,
                                                                      in_dataset,
                                                                      adv_attack,
                                                                      classifier_id=id)
-                jobs.append(
-                    cache_func(density_path,
-                               train_density_adv,
-                               in_dataset,
-                               cls_type,
-                               cls_path,
-                               adv_attack,
-                               id=id))
                 jobs.append(
                     cache_func(lid_path,
                                train_multiple_lid_adv,
