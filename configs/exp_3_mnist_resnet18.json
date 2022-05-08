@@ -1,0 +1,89 @@
+{
+    "in_dataset": "mnist",
+    "out_dataset": "fmnist",
+    "additional_out_datasets": [],
+    "classifiers": [
+        {
+            "name": "base",
+            "type": "resnet18",
+            "train_kwargs": {
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_resnet18_base"
+            }
+        },
+        {
+            "name": "l2_reg",
+            "type": "resnet18",
+            "train_kwargs": {
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_resnet18_l2_reg",
+                "l2_penalty": 1e-2
+            }
+        },
+        {
+            "name": "grad_norm_clip",
+            "type": "resnet18",
+            "train_kwargs": {
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_resnet18_grad_norm_clip",
+                "max_grad_norm": 1.0
+            }
+        },
+        {
+            "name": "adv_train",
+            "type": "resnet18",
+            "train_kwargs": {
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_resnet18_adv_train",
+                "opt_name": "sgd",
+                "adv_steps": 7,
+                "adv_eps": 1e-1
+            }
+        },
+        {
+            "name": "grad_penalty",
+            "type": "resnet18",
+            "train_kwargs": {
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_resnet18_grad_penalty",
+                "lipshitz_gp": 1e-1
+            }
+        },
+        {
+            "name": "spectral_norm",
+            "type": "resnet18",
+            "cls_kwargs": {
+                "spectral_normalization": true
+            },
+            "train_kwargs": {
+                "tensorboard_path": "tensorboard/classifiers/cls_mnist_resnet18_spectral_norm"
+            }
+        }
+    ],
+    "generators": [
+        {
+            "type": "mnist_vae",
+            "kwargs": {
+                "beta": 10.0
+            }
+        },
+        {
+            "type": "wgan_gp",
+            "kwargs": {
+                "lambda_term": 10.0,
+                "critic_iter": 5
+            },
+            "encode_path": "data/wgan_gp_encode_mnist_test.npz"
+        }
+    ],
+    "adv_attacks": [
+        "fgsm",
+        "bim",
+        "cwl2"
+    ],
+    "contrastive_methods": [
+        "am",
+        "xgems",
+        "cdeepex"
+    ],
+    "contrastive_kwargs": {
+        "shards": 20,
+        "batch_size": 256
+    },
+    "contrastive_subset": 100
+}
