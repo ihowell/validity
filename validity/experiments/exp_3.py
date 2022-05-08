@@ -365,9 +365,7 @@ def _evaluate(cfg):
             out_file.write(f'\n\nResults for {id}:')
 
             joint_ood_adv(cls_type,
-                          in_dataset,
-                          out_dataset,
-                          cfg['additional_out_datasets'],
+                          in_dataset, [out_dataset] + cfg.get('additional_out_datasets', []),
                           cfg['adv_attacks'],
                           classifier_id=cls_cfg['name'],
                           fp=out_file)
