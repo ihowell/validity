@@ -131,7 +131,7 @@ def joint_ood_adv(net_type,
         results.append(row)
 
     fp.write(tabulate(results, tablefmt='tsv'))
-    fp.write('')
+    fp.write('\n')
     headers = ['OOD Method', 'Adv Method', in_ds_name
                ] + out_ds_names + adv_attacks + ['Combined']
 
@@ -169,6 +169,7 @@ def joint_ood_adv(net_type,
             results.append(row)
 
     fp.write(tabulate(results, headers=headers, tablefmt='tsv', floatfmt='.4f'))
+    fp.write('\n')
 
 
 if __name__ == '__main__':
