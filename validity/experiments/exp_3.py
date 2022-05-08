@@ -17,6 +17,7 @@ from validity.detectors.odin import train_multiple_odin, get_best_odin_path, \
     load_best_odin
 from validity.detectors.mahalanobis import get_best_mahalanobis_ood_path, get_best_mahalanobis_adv_path, \
     train_multiple_mahalanobis_adv, train_multiple_mahalanobis_ood
+from validity.experiments.joint_ood_adv import joint_ood_adv
 from validity.generators.mnist_vae import train as train_mnist_vae, \
     get_save_path as get_mnist_vae_path, encode_dataset as mnist_vae_encode_dataset
 from validity.generators.wgan_gp import train as train_wgan_gp, get_save_path as get_wgan_gp_path, \
@@ -362,6 +363,14 @@ def _evaluate(cfg):
             id = cls_cfg['name']
             cls_path = get_cls_path(cls_cfg['type'], in_dataset, id=cls_cfg['name'])
             out_file.write(f'\n\nResults for {id}:')
+
+            joint_ood_adv(cls_type,
+                          in_dataset,
+                          out_dataset,
+                          cfg['additional_out_datasets'],
+                          cfg['adv_attacks'],
+                          classifier_id=cls_cfg['name'],
+                          fp=out_file)
 
             results = {}
             for contrastive_method in cfg['contrastive_methods']:

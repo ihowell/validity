@@ -1,7 +1,10 @@
 {
     "in_dataset": "mnist",
     "out_dataset": "fmnist",
-    "additional_out_datasets": [],
+    "additional_out_datasets": [
+        "gray-svhn",
+        "gray-cifar10"
+    ],
     "classifiers": [
         {
             "name": "base",
