@@ -354,8 +354,9 @@ def run_experiment(cfg_file, high_performance=False):
 def _evaluate(cfg):
     in_dataset = cfg['in_dataset']
     out_dataset = cfg['out_dataset']
+    net_type = cfg['classifiers'][0]['type']
     # Evaluate contrastive examples
-    with open('data/results.txt', 'w') as out_file:
+    with open(f'data/results_{in_dataset}_{net_type}.txt', 'w') as out_file:
         for cls_cfg in cfg['classifiers']:
             cls_type = cls_cfg['type']
             id = cls_cfg['name']
